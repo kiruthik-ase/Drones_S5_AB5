@@ -1,0 +1,18 @@
+- `[ ]` **Phase 1: Core Planner (Kinematic Only)**
+  - `[ ]` Setup Python virtual environment and dependencies.
+  - `[ ]` Implement B-spline evaluation functions (basis, derivatives).
+  - `[ ]` Formulate MILP problem using open-source solver (e.g., CVXPY with HiGHS/CBC/SCIP).
+  - `[ ]` Implement Objective J1 (Length).
+  - `[ ]` Implement Objective J2 (Altitude).
+  - `[ ]` Implement Objective J3 (Active knots penalty).
+  - `[ ]` Implement dynamic constraints (Velocity, Acceleration).
+  - `[ ]` Run simple start-to-goal test scenario and plot.
+- `[ ]` **Phase 2: Environment & Obstacles**
+  - `[ ]` Implement Static Obstacle constraints (Big-M).
+  - `[ ]` Implement Terrain Tangent-Plane constraints.
+  - `[ ]` Test with obstacles and terrain.
+- `[ ]` **Phase 3: PyBullet Integration & Controller**
+  - `[ ]` Setup PyBullet quadrotor environment.
+  - `[ ]` Implement Geometric Tracking Controller.
+  - `[ ]` Integrate Planner and Controller in simulation loop.
+  - `[ ]` Final testing and tuning.
