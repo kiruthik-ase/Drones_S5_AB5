@@ -74,7 +74,7 @@ def main():
     # ------------------------------------------------------------------- #
     print("\n[Phase 1] Pre-computing Receding-Horizon trajectory ...")
     t0 = time.time()
-    planner = UAVPlannerMILP(h=10, ts=1.0)
+    planner = UAVPlannerMILP(h=10, ts=1.0, z_max=25.0)
     x_s, v_s, a_s, x_f = build_scenario(planner)
     ref_t, ref_pos, ref_vel, ref_acc, _ = precompute_rhc_trajectory(
         planner, x_s, v_s, a_s, x_f,
@@ -170,7 +170,7 @@ def main():
     xlo, xhi = min(all_x)-200, max(all_x)+200
     ylo, yhi = min(all_y)-200, max(all_y)+200
 
-    ax3d.set_xlim(xlo, xhi); ax3d.set_ylim(ylo, yhi); ax3d.set_zlim(0, 150)
+    ax3d.set_xlim(xlo, xhi); ax3d.set_ylim(ylo, yhi); ax3d.set_zlim(0, 50)
     ax3d.set_xlabel('X (m)', color=C_TXT, fontsize=9)
     ax3d.set_ylabel('Y (m)', color=C_TXT, fontsize=9)
     ax3d.set_zlabel('Z (m)', color=C_TXT, fontsize=9)

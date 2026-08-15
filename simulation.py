@@ -76,6 +76,7 @@ def create_figure(ref_t, ref_pos, ref_vel, ref_acc,
     ax3d.set_xlabel('X (m)', color=C_TXT)
     ax3d.set_ylabel('Y (m)', color=C_TXT)
     ax3d.set_zlabel('Z (m)', color=C_TXT)
+    ax3d.set_zlim(0, 30)
     ax3d.set_title('3-D Trajectory', color=C_TXT, fontsize=13, fontweight='bold')
     ax3d.legend(fontsize=8, loc='upper left')
     ax3d.view_init(elev=25, azim=-60)
@@ -162,7 +163,7 @@ def main():
     print("  Scenario: Dense Urban Canyon (8 buildings, 2 no-fly zones)")
     print("=" * 65)
 
-    planner = UAVPlannerMILP(h=10, ts=1.0)
+    planner = UAVPlannerMILP(h=10, ts=1.0, z_max=25.0)
     x_s, v_s, a_s, x_f = build_scenario(planner)
 
     # Phase 1: RHC trajectory

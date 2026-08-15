@@ -5,7 +5,7 @@ from bspline_utils import get_bspline_matrices
 import time
 
 class UAVPlannerMILP:
-    def __init__(self, h=10, ts=1.0):
+    def __init__(self, h=10, ts=1.0, z_max=25.0):
         self.k = 4
         self.h = h
         self.ts = ts
@@ -16,10 +16,11 @@ class UAVPlannerMILP:
         
         self.v_max = 60.0
         self.a_max = 14.715
+        self.z_max = z_max        # hard ceiling altitude (m)
         
         self.w1 = 1.0    # Trajectory length weight
         self.w2 = 10.0   # Target approach weight
-        self.w3 = 0.05   # Altitude weight
+        self.w3 = 0.3    # Altitude penalty (ceiling constraint handles building avoidance)
         self.w4 = 0.1    # Active knots penalty (J3) weight
         
         # Obstacles
@@ -55,8 +56,9 @@ class UAVPlannerMILP:
             constraints += [A[i, :] <= self.a_max]
             constraints += [A[i, :] >= -self.a_max]
             
-        # Z constraint (flat terrain avoidance, kappa = 1.0)
+        # Z constraint: floor=1m, ceiling=z_max (forces lateral avoidance of tall buildings)
         constraints += [X[:, 2] >= 1.0]
+        constraints += [X[:, 2] <= self.z_max]
         
         # Disjunctive constraints for 3D obstacles
         for obs in self.obstacles:
