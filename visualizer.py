@@ -1,46 +1,72 @@
 """
-Live GUI Visualizer
-===================
-Runs the full UAV pipeline then plays back the flight as a real-time
-animation in a 3-panel matplotlib window.
+Live GUI Visualizer  --  Clean Edition
+=======================================
+Features:
+  - Clean dark professional theme
+  - Drone shown as a solid glowing dot (no arm lines)
+  - Short buildings (flyover) in teal, Tall buildings (lateral) in steel blue
+  - Live telemetry: speed | altitude | tracking error
+  - SPACE to pause and freely rotate/zoom the 3D view
+  - Optional GIF/MP4 export
 
-Layout
-------
-  Left  (large)  : 3-D flight animation -- drone flies through buildings
-  Top-right       : Top-down (X-Y) map with live dot tracking
-  Bottom-right    : Live telemetry strip charts (speed, altitude, error)
-
-Usage
------
-  python visualizer.py
+Run:
+    python visualizer.py               # interactive window
+    python visualizer.py --save        # also save flight.gif/mp4
+    python visualizer.py --fresh       # force recompute (ignore cache)
 """
 
 import sys
+import os
 sys.stdout.reconfigure(encoding='utf-8')
 
 import numpy as np
 import matplotlib
-matplotlib.use('TkAgg')          # interactive window
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Rectangle, FancyArrowPatch
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-import matplotlib.patheffects as pe
 import time
 
 from planner_obstacles import UAVPlannerMILP
-from controller import GeometricController
 from quadrotor import Quadrotor
-from bspline_utils import sample_trajectory
-from scenario import build_scenario
-from core import precompute_rhc_trajectory, simulate_dynamics
+from scenario import build_scenario, create_dynamic_obstacle, Z_CEILING
+from core import run_closed_loop_rhc
+
+
+# ======================================================================= #
+#  THEME                                                                    #
+# ======================================================================= #
+
+C_BG      = '#0d1117'   # main background
+C_PANEL   = '#161b22'   # panel background
+C_BORDER  = '#30363d'   # panel borders
+C_TXT     = '#c9d1d9'   # primary text
+C_TXT2    = '#8b949e'   # secondary text
+
+C_REF     = '#58a6ff'   # reference trajectory (blue)
+C_ACT     = '#ff7b72'   # actual trajectory (coral)
+C_TALL    = '#1f3a5f'   # tall building face (dark steel blue)
+C_TALL_E  = '#388bfd'   # tall building edge
+C_LOW     = '#0d3d2e'   # short/overfly-able building face (dark teal)
+C_LOW_E   = '#2ea875'   # short building edge
+C_NFZ     = '#3d1515'   # no-fly zone face (dark red)
+C_NFZ_E   = '#da3633'   # no-fly zone edge
+C_DRN     = '#ffa657'   # drone body (warm amber)
+C_MOTEUR  = '#ffffff'   # motor dots
+C_GRID    = '#21262d'   # grid lines
+C_ALT     = '#d2a8ff'   # altitude line (purple)
+C_SPD     = '#79c0ff'   # speed line
+C_ERR     = '#ff7b72'   # error line
+
 
 # ======================================================================= #
 #  HELPERS                                                                  #
 # ======================================================================= #
 
-def draw_cuboid_3d(ax, xl, xu, yl, yu, zl, zu, color, alpha=0.45):
+def draw_cuboid_3d(ax, xl, xu, yl, yu, zl, zu,
+                   face_color, edge_color, face_alpha=0.55, edge_alpha=0.8):
     verts = [
         [[xl,yl,zl],[xu,yl,zl],[xu,yu,zl],[xl,yu,zl]],
         [[xl,yl,zu],[xu,yl,zu],[xu,yu,zu],[xl,yu,zu]],
@@ -49,263 +75,393 @@ def draw_cuboid_3d(ax, xl, xu, yl, yu, zl, zu, color, alpha=0.45):
         [[xl,yl,zl],[xu,yl,zl],[xu,yl,zu],[xl,yl,zu]],
         [[xl,yu,zl],[xu,yu,zl],[xu,yu,zu],[xl,yu,zu]],
     ]
-    pc = Poly3DCollection(verts, facecolors=color, linewidths=0.4,
-                          edgecolors='#ffffff44', alpha=alpha)
+    pc = Poly3DCollection(verts,
+                          facecolors=face_color,
+                          linewidths=0.5,
+                          edgecolors=edge_color,
+                          alpha=face_alpha)
     ax.add_collection3d(pc)
 
-def draw_cuboid_2d(ax, xl, xu, yl, yu, color, alpha, linestyle='-'):
-    rect = Rectangle((xl, yl), xu-xl, yu-yl,
-                      facecolor=color, alpha=alpha,
-                      edgecolor='white', lw=0.8, linestyle=linestyle)
-    ax.add_patch(rect)
+
+def draw_rect_2d(ax, xl, xu, yl, yu, face_color, edge_color, alpha=0.6, ls='-'):
+    ax.add_patch(Rectangle((xl, yl), xu-xl, yu-yl,
+                            facecolor=face_color, alpha=alpha,
+                            edgecolor=edge_color, lw=0.8, linestyle=ls))
+
+
+def style_2d_ax(ax):
+    ax.set_facecolor(C_PANEL)
+    ax.tick_params(colors=C_TXT2, labelsize=7)
+    for sp in ax.spines.values():
+        sp.set_edgecolor(C_BORDER)
+    ax.grid(True, alpha=0.25, color=C_GRID, lw=0.5)
+
 
 # ======================================================================= #
 #  MAIN                                                                     #
 # ======================================================================= #
 
 def main():
-    print("=" * 65)
-    print("  UAV Live GUI Visualizer")
-    print("  Scenario: Dense Urban Canyon (8 buildings, 2 no-fly zones)")
-    print("=" * 65)
+    save_mp4   = '--save'  in sys.argv
+    use_fresh  = '--fresh' in sys.argv
+    CACHE_FILE = 'simulation_cache.npz'
 
-    # ------------------------------------------------------------------- #
-    #  1. Pre-compute trajectory                                            #
-    # ------------------------------------------------------------------- #
-    print("\n[Phase 1] Pre-computing Receding-Horizon trajectory ...")
-    t0 = time.time()
-    planner = UAVPlannerMILP(h=10, ts=1.0, z_max=25.0)
+    print("=" * 68)
+    print("  UAV Live Visualizer  |  Mixed-Height Urban Canyon")
+    print("  Tall buildings: lateral nav  |  Short buildings: fly-over")
+    print("=" * 68)
+
+    # Always fast -- just registers obstacles/NFZs in the planner lists
+    planner = UAVPlannerMILP(h=10, ts=1.0, z_max=Z_CEILING)
     x_s, v_s, a_s, x_f = build_scenario(planner)
-    ref_t, ref_pos, ref_vel, ref_acc, _ = precompute_rhc_trajectory(
-        planner, x_s, v_s, a_s, x_f,
-        max_iter=100, execute_time=2.0, dt_ref=0.01
-    )
-    print(f"  Done in {time.time()-t0:.1f}s  -- {ref_t[-1]:.1f}s flight")
+    dyn_obs = create_dynamic_obstacle()
 
-    # ------------------------------------------------------------------- #
-    #  2. Simulate dynamics                                                 #
-    # ------------------------------------------------------------------- #
-    print("\n[Phase 2] Simulating 6-DOF quadrotor dynamics ...")
-    t0 = time.time()
-    log_t, log_pos, log_vel, log_eul, log_u = simulate_dynamics(
-        ref_t, ref_pos, ref_vel, ref_acc, dt_sim=0.002
-    )
-    print(f"  Done in {time.time()-t0:.1f}s  -- {len(log_t)} steps")
+    # ------------------------------------------------------------------ #
+    #  Load from cache OR run full simulation                              #
+    # ------------------------------------------------------------------ #
+    if not use_fresh and os.path.exists(CACHE_FILE):
+        print(f"\n[Phase 1+2] Loading cached results from {CACHE_FILE} ...")
+        t0   = time.time()
+        data = np.load(CACHE_FILE)
+        ref_t    = data['ref_t'];    ref_pos  = data['ref_pos']
+        log_t    = data['log_t'];    log_pos  = data['log_pos']
+        log_vel  = data['log_vel'];  log_eul  = data['log_eul']
+        log_u    = data['log_u'];    log_wind = data['log_wind']
+        print(f"  Loaded {len(log_t):,} steps ({log_t[-1]:.1f}s flight) "
+              f"in {time.time()-t0:.2f}s  \u2713")
+        print("  Tip: run 'python visualizer.py --fresh' to recompute")
+    else:
+        print(f"\n[Phase 1+2] Running closed-loop RHC ...")
+        t0 = time.time()
+        (ref_t, ref_pos,
+         log_t, log_pos, log_vel, log_eul, log_u, log_wind,
+         plan_log) = run_closed_loop_rhc(
+            planner, x_s, v_s, a_s, x_f,
+            max_iter=120, execute_time=2.0, dt_sim=0.002,
+            dyn_obs=dyn_obs, enable_wind=True
+        )
+        print(f"  Done in {time.time()-t0:.1f}s  -- {log_t[-1]:.1f}s flight")
+        np.savez_compressed(CACHE_FILE,
+                            ref_t=ref_t, ref_pos=ref_pos,
+                            log_t=log_t, log_pos=log_pos,
+                            log_vel=log_vel, log_eul=log_eul,
+                            log_u=log_u, log_wind=log_wind)
+        print(f"  Cache saved -> {CACHE_FILE}")
 
-    # ------------------------------------------------------------------- #
-    #  3. Downsample for animation (aim for ~60 fps visual, 1 s real/sim)  #
-    # ------------------------------------------------------------------- #
-    # We replay 138 sim-seconds in ~30 real-seconds -> speed x4.6
-    ANIM_FPS   = 30                          # frames per second shown
-    SPEED_MULT = 5.0                         # sim time per real second
-    dt_anim    = SPEED_MULT / ANIM_FPS       # sim-seconds between frames
-    dt_sim     = log_t[1] - log_t[0]
-    stride     = max(1, int(dt_anim / dt_sim))
+    # ------------------------------------------------------------------ #
+    #  Downsample for animation                                            #
+    # ------------------------------------------------------------------ #
+    ANIM_FPS   = 30
+    SPEED_MULT = 5.0
+    dt_anim    = SPEED_MULT / ANIM_FPS
+    dt_sim_val = log_t[1] - log_t[0] if len(log_t) > 1 else 0.002
+    stride     = max(1, int(dt_anim / dt_sim_val))
 
-    a_t   = log_t[::stride]
-    a_pos = log_pos[::stride]
-    a_vel = log_vel[::stride]
+    a_t    = log_t[::stride]
+    a_pos  = log_pos[::stride]
+    a_vel  = log_vel[::stride]
+    a_eul  = log_eul[::stride]
+    a_wind = log_wind[::stride]
+    N      = len(a_t)
+    dt_ref_s = ref_t[1] - ref_t[0] if len(ref_t) > 1 else 0.002
 
-    # Reference downsampled at same stride (ref is 100 Hz, sim is 500 Hz)
-    ref_stride = max(1, int(stride * (dt_sim / (ref_t[1]-ref_t[0]))))
-    r_pos = ref_pos[::ref_stride]
+    paused = [False]
 
-    N_frames = len(a_t)
-    dt_ref_s = ref_t[1] - ref_t[0]
+    # ------------------------------------------------------------------ #
+    #  Build figure                                                        #
+    # ------------------------------------------------------------------ #
+    plt.rcParams.update({
+        'font.family': 'monospace',
+        'axes.labelcolor': C_TXT,
+        'xtick.color': C_TXT2,
+        'ytick.color': C_TXT2,
+    })
 
-    # ------------------------------------------------------------------- #
-    #  4. Build figure                                                      #
-    # ------------------------------------------------------------------- #
-    fig = plt.figure(figsize=(19, 10), facecolor='#0a0a1a')
-    fig.canvas.manager.set_window_title('UAV Urban Canyon Navigation -- Live Simulation')
+    fig = plt.figure(figsize=(21, 10), facecolor=C_BG)
+    try:
+        fig.canvas.manager.set_window_title(
+            'UAV Mixed-Height Urban Canyon  |  Closed-Loop RHC')
+    except Exception:
+        pass
 
-    gs = gridspec.GridSpec(2, 2, width_ratios=[1.7, 1], hspace=0.35, wspace=0.3)
+    gs = gridspec.GridSpec(3, 2, width_ratios=[1.65, 1],
+                           hspace=0.45, wspace=0.22,
+                           left=0.03, right=0.97, top=0.93, bottom=0.06)
 
-    ax3d  = fig.add_subplot(gs[:, 0], projection='3d')   # left (full height)
-    ax_xy = fig.add_subplot(gs[0, 1])                    # top-right
-    ax_tel= fig.add_subplot(gs[1, 1])                    # bottom-right
+    ax3d  = fig.add_subplot(gs[:, 0], projection='3d')
+    ax_xy = fig.add_subplot(gs[0, 1])
+    ax_xz = fig.add_subplot(gs[1, 1])
+    ax_tel = fig.add_subplot(gs[2, 1])
 
-    C_BG  = '#0a0a1a'
-    C_REF = '#00d4ff'
-    C_ACT = '#ff6b6b'
-    C_OBS = '#4169E1'
-    C_NFZ = '#cc2222'
-    C_TXT = '#e8e8e8'
-    C_DRN = '#ffcc00'
+    style_2d_ax(ax_xy)
+    style_2d_ax(ax_xz)
+    style_2d_ax(ax_tel)
+    ax3d.set_facecolor(C_BG)
 
-    for ax in [ax_xy, ax_tel]:
-        ax.set_facecolor('#111130')
-        ax.tick_params(colors=C_TXT, labelsize=8)
-        for sp in ax.spines.values():
-            sp.set_edgecolor('#334')
+    # ---------- Compute z_ceil for distinguishing tall vs short ----------
+    TALL_THRESH = Z_CEILING  # anything above this cannot be overflown
 
-    ax3d.set_facecolor('#0d0d25')
-
-    # ------ 3D: static environment ------
+    # ---------- 3D: Draw buildings (two styles) ----------
     for obs in planner.obstacles:
+        is_short = obs['zu'] <= TALL_THRESH
+        fc = C_LOW  if is_short else C_TALL
+        ec = C_LOW_E if is_short else C_TALL_E
+        disp_zu = obs['zu'] if is_short else 35.0
         draw_cuboid_3d(ax3d, obs['xl'], obs['xu'], obs['yl'], obs['yu'],
-                       obs['zl'], obs['zu'], color=C_OBS)
+                       obs['zl'], disp_zu, fc, ec, face_alpha=0.65)
+
+    # 3D NFZ volumes (very transparent)
     for nfz in planner.no_fly_zones:
         draw_cuboid_3d(ax3d, nfz['xl'], nfz['xu'], nfz['yl'], nfz['yu'],
-                       0, 30, color=C_NFZ, alpha=0.12)
+                       0, 28, C_NFZ, C_NFZ_E, face_alpha=0.08)
 
-    # Full reference path (ghost)
+    # Reference ghost path
     ax3d.plot(ref_pos[:,0], ref_pos[:,1], ref_pos[:,2],
-              '-', color=C_REF, lw=0.8, alpha=0.3, label='B-Spline ref')
+              '-', color=C_REF, lw=0.7, alpha=0.18)
 
-    # Dynamic elements (will be updated each frame)
-    trail_len = int(8.0 / dt_anim)   # ~8 seconds of trail
+    # Z ceiling plane (subtle)
+    xl_env = min(o['xl'] for o in planner.obstacles) - 100
+    xu_env = max(o['xu'] for o in planner.obstacles) + 100
+    yl_env = min(o['yl'] for o in planner.obstacles) - 100
+    yu_env = max(o['yu'] for o in planner.obstacles) + 100
+    xx, yy = np.meshgrid([xl_env, xu_env], [yl_env, yu_env])
+    zz = np.full_like(xx, Z_CEILING)
+    ax3d.plot_surface(xx, yy, zz, alpha=0.04, color='#58a6ff',
+                      linewidth=0, antialiased=False)
+
+    ax3d.scatter(*x_s, color='#3fb950', s=90, zorder=9,
+                 marker='o', label='Start', depthshade=False)
+    ax3d.scatter(*x_f, color='#f0883e', s=130, zorder=9,
+                 marker='*', label='Goal', depthshade=False)
+
+    # Axis limits
+    all_x = [x_s[0], x_f[0]] + [o['xl'] for o in planner.obstacles] + \
+            [o['xu'] for o in planner.obstacles]
+    all_y = [x_s[1], x_f[1]] + [o['yl'] for o in planner.obstacles] + \
+            [o['yu'] for o in planner.obstacles]
+    xlo, xhi = min(all_x) - 200, max(all_x) + 200
+    ylo, yhi = min(all_y) - 200, max(all_y) + 200
+
+    ax3d.set_xlim(xlo, xhi)
+    ax3d.set_ylim(ylo, yhi)
+    ax3d.set_zlim(0, 38)
+    ax3d.set_xlabel('X (m)', color=C_TXT2, fontsize=8, labelpad=2)
+    ax3d.set_ylabel('Y (m)', color=C_TXT2, fontsize=8, labelpad=2)
+    ax3d.set_zlabel('Z (m)', color=C_TXT2, fontsize=8, labelpad=2)
+    ax3d.set_title('3-D Urban Canyon  |  \u25a0 Tall (lateral)  \u25a0 Low (fly-over)',
+                   color=C_TXT, fontsize=11, fontweight='bold', pad=4)
+    ax3d.view_init(elev=28, azim=-50)
+    ax3d.tick_params(colors=C_TXT2, labelsize=7)
+    ax3d.xaxis.pane.fill = False
+    ax3d.yaxis.pane.fill = False
+    ax3d.zaxis.pane.fill = False
+    ax3d.xaxis.pane.set_edgecolor(C_BORDER)
+    ax3d.yaxis.pane.set_edgecolor(C_BORDER)
+    ax3d.zaxis.pane.set_edgecolor(C_BORDER)
+    ax3d.legend(fontsize=8, loc='upper left', facecolor=C_PANEL,
+                labelcolor=C_TXT, framealpha=0.9, edgecolor=C_BORDER)
+
+    # ---------- Dynamic 3D elements ----------
+    trail_len = int(10.0 / dt_anim)   # 10s of trail
+
     trail3d,  = ax3d.plot([], [], [], '-', color=C_ACT, lw=2.0, alpha=0.9)
-    drone3d   = ax3d.scatter([], [], [], s=120, color=C_DRN, zorder=10,
-                              depthshade=False, marker='o')
 
-    ax3d.scatter(*x_s, color='lime',  s=80, zorder=8, label='Start')
-    ax3d.scatter(*x_f, color='gold',  s=120, zorder=8, marker='*', label='Goal')
+    # Drone: single prominent glowing dot
+    drone_body = ax3d.scatter([], [], [], s=220, color=C_DRN,
+                              zorder=12, depthshade=False,
+                              edgecolors='white', linewidths=1.2,
+                              marker='o')
 
-    # Environment bounds
-    all_x = [x_s[0], x_f[0]]
-    all_y = [x_s[1], x_f[1]]
-    for o in planner.obstacles:
-        all_x += [o['xl'], o['xu']]; all_y += [o['yl'], o['yu']]
-    xlo, xhi = min(all_x)-200, max(all_x)+200
-    ylo, yhi = min(all_y)-200, max(all_y)+200
+    # HUD text (clean monospace)
+    hud_txt = ax3d.text2D(0.02, 0.97, '', transform=ax3d.transAxes,
+                           color=C_TXT, fontsize=8.5,
+                           fontfamily='monospace', va='top',
+                           bbox=dict(boxstyle='round,pad=0.4',
+                                     facecolor=C_PANEL,
+                                     edgecolor=C_BORDER,
+                                     alpha=0.85))
 
-    ax3d.set_xlim(xlo, xhi); ax3d.set_ylim(ylo, yhi); ax3d.set_zlim(0, 50)
-    ax3d.set_xlabel('X (m)', color=C_TXT, fontsize=9)
-    ax3d.set_ylabel('Y (m)', color=C_TXT, fontsize=9)
-    ax3d.set_zlabel('Z (m)', color=C_TXT, fontsize=9)
-    ax3d.set_title('3-D Urban Canyon Navigation', color=C_TXT,
-                   fontsize=12, fontweight='bold', pad=6)
-    ax3d.legend(fontsize=7, loc='upper left', facecolor='#1a1a3a',
-                labelcolor=C_TXT, framealpha=0.8)
-    ax3d.view_init(elev=28, azim=-55)
-    ax3d.tick_params(colors=C_TXT, labelsize=7)
-
-    # HUD text on 3D
-    time_txt = ax3d.text2D(0.02, 0.97, '', transform=ax3d.transAxes,
-                            color=C_TXT, fontsize=9,
-                            fontfamily='monospace', va='top')
-
-    # ------ Top-right: 2D map ------
+    # ---------- 2D Top-Down Map (X-Y) ----------
     for obs in planner.obstacles:
-        draw_cuboid_2d(ax_xy, obs['xl'], obs['xu'], obs['yl'], obs['yu'],
-                       C_OBS, 0.55)
+        is_short = obs['zu'] <= TALL_THRESH
+        fc = C_LOW  if is_short else C_TALL
+        ec = C_LOW_E if is_short else C_TALL_E
+        draw_rect_2d(ax_xy, obs['xl'], obs['xu'], obs['yl'], obs['yu'],
+                     fc, ec, alpha=0.75)
     for nfz in planner.no_fly_zones:
-        draw_cuboid_2d(ax_xy, nfz['xl'], nfz['xu'], nfz['yl'], nfz['yu'],
-                       C_NFZ, 0.15, linestyle='--')
+        draw_rect_2d(ax_xy, nfz['xl'], nfz['xu'], nfz['yl'], nfz['yu'],
+                     C_NFZ, C_NFZ_E, alpha=0.25, ls='--')
 
-    ax_xy.plot(ref_pos[:,0], ref_pos[:,1], '-', color=C_REF, lw=1.0, alpha=0.4)
-    trail2d,  = ax_xy.plot([], [], '-', color=C_ACT, lw=1.8, alpha=0.9)
-    dot2d,    = ax_xy.plot([], [], 'o', color=C_DRN, ms=7, zorder=10)
-    ax_xy.plot(x_s[0], x_s[1], 'o', color='lime',  ms=8, label='Start', zorder=9)
-    ax_xy.plot(x_f[0], x_f[1], '*', color='gold',  ms=12, label='Goal',  zorder=9)
-    ax_xy.set_xlim(xlo, xhi); ax_xy.set_ylim(ylo, yhi)
-    ax_xy.set_aspect('equal')
-    ax_xy.set_xlabel('X (m)', color=C_TXT, fontsize=8)
-    ax_xy.set_ylabel('Y (m)', color=C_TXT, fontsize=8)
-    ax_xy.set_title('Top-Down Map', color=C_TXT, fontsize=10, fontweight='bold')
-    ax_xy.legend(fontsize=7, facecolor='#1a1a3a', labelcolor=C_TXT, framealpha=0.8)
-    ax_xy.grid(True, alpha=0.1, color='white')
+    ax_xy.plot(ref_pos[:,0], ref_pos[:,1], '-',
+               color=C_REF, lw=0.9, alpha=0.30)
+    trail2d, = ax_xy.plot([], [], '-', color=C_ACT, lw=1.8, alpha=0.9)
+    dot2d,   = ax_xy.plot([], [], 'o', color=C_DRN, ms=8, zorder=10,
+                          markeredgecolor='white', markeredgewidth=0.5)
+    ax_xy.plot(x_s[0], x_s[1], 'o', color='#3fb950', ms=8, zorder=9)
+    ax_xy.plot(x_f[0], x_f[1], '*', color='#f0883e', ms=12, zorder=9)
+    ax_xy.set_xlim(xlo, xhi)
+    ax_xy.set_ylim(ylo, yhi)
+    ax_xy.set_xlabel('X (m)', fontsize=7.5)
+    ax_xy.set_ylabel('Y (m)', fontsize=7.5)
+    ax_xy.set_title('Top-Down Map (X-Y)', color=C_TXT, fontsize=9.5, fontweight='bold')
 
-    # ------ Bottom-right: Telemetry ------
-    tel_len = min(300, N_frames)
-    tel_t = np.zeros(tel_len)
+    # ---------- 2D Side Elevation Profile (X-Z) ----------
+    for obs in planner.obstacles:
+        is_short = obs['zu'] <= TALL_THRESH
+        fc = C_LOW  if is_short else C_TALL
+        ec = C_LOW_E if is_short else C_TALL_E
+        disp_zu = obs['zu'] if is_short else 35.0
+        draw_rect_2d(ax_xz, obs['xl'], obs['xu'], obs['zl'], disp_zu,
+                     fc, ec, alpha=0.75)
 
-    speed_data = np.zeros(tel_len)
-    alt_data   = np.zeros(tel_len)
-    err_data   = np.zeros(tel_len)
+    ax_xz.axhline(Z_CEILING, color=C_REF, lw=0.8, ls=':', alpha=0.6)
+    ax_xz.text(xhi - 400, Z_CEILING + 1.0, f'z_max={Z_CEILING:.0f}m',
+               color=C_REF, fontsize=6.5, alpha=0.8)
 
-    dt_ref_s2 = ref_t[1] - ref_t[0]
+    ax_xz.plot(ref_pos[:,0], ref_pos[:,2], '-',
+               color=C_REF, lw=0.9, alpha=0.30)
+    trail_xz, = ax_xz.plot([], [], '-', color=C_ACT, lw=1.8, alpha=0.9)
+    dot_xz,   = ax_xz.plot([], [], 'o', color=C_DRN, ms=8, zorder=10,
+                           markeredgecolor='white', markeredgewidth=0.5)
+    ax_xz.plot(x_s[0], x_s[2], 'o', color='#3fb950', ms=8, zorder=9)
+    ax_xz.plot(x_f[0], x_f[2], '*', color='#f0883e', ms=12, zorder=9)
+    ax_xz.set_xlim(xlo, xhi)
+    ax_xz.set_ylim(0, 38)
+    ax_xz.set_xlabel('X (m)', fontsize=7.5)
+    ax_xz.set_ylabel('Z (m)', fontsize=7.5)
+    ax_xz.set_title('Side Elevation (X-Z Profile)', color=C_TXT, fontsize=9.5, fontweight='bold')
 
-    ax_tel.set_xlim(0, a_t[min(tel_len-1, N_frames-1)])
-    ax_tel.set_ylim(0, 100)
-    ax_tel.set_xlabel('Sim time (s)', color=C_TXT, fontsize=8)
-    ax_tel.set_title('Live Telemetry', color=C_TXT, fontsize=10, fontweight='bold')
-    ax_tel.grid(True, alpha=0.12, color='white')
+    # ---------- Altitude side-view strip ----------
+    ax_tel.set_xlabel('Sim time (s)', fontsize=7.5)
+    ax_tel.set_title('Live Telemetry', color=C_TXT, fontsize=9.5, fontweight='bold')
 
-    ln_speed, = ax_tel.plot([], [], '-',  color='#00ff88', lw=1.4, label='Speed (m/s)')
-    ln_alt,   = ax_tel.plot([], [], '-',  color='#ffaa00', lw=1.4, label='Altitude (m)')
-    ln_err,   = ax_tel.plot([], [], '--', color='#ff6b6b', lw=1.1, label='Error x5 (m)')
-    ax_tel.legend(fontsize=7, facecolor='#1a1a3a', labelcolor=C_TXT, framealpha=0.8)
+    ln_alt,  = ax_tel.plot([], [], '-',  color=C_ALT, lw=1.6, label='Altitude (m)')
+    ln_spd,  = ax_tel.plot([], [], '-',  color=C_SPD, lw=1.6, label='Speed (m/s)')
+    ln_err,  = ax_tel.plot([], [], '--', color=C_ERR, lw=1.2, label='Track err ×5 (m)')
 
-    # telemetry window — keep last tel_len points
-    buf_t     = []
-    buf_spd   = []
-    buf_alt   = []
-    buf_err   = []
+    # Draw altitude ceiling line
+    ax_tel.axhline(Z_CEILING, color=C_REF, lw=0.8, ls=':', alpha=0.6)
 
-    plt.suptitle('UAV B-Spline Trajectory Planning -- Geometric Tracking Control\n'
-                 'Dense Urban Canyon Scenario',
-                 color='white', fontsize=13, fontweight='bold', y=1.01)
+    ax_tel.legend(fontsize=6.5, facecolor=C_PANEL, labelcolor=C_TXT,
+                  framealpha=0.9, edgecolor=C_BORDER, loc='upper right')
 
-    # ------------------------------------------------------------------- #
-    #  5. Animation                                                         #
-    # ------------------------------------------------------------------- #
+    buf_t = []; buf_alt = []; buf_spd = []; buf_err = []
+    TEL_WIN = 350
+
+    # ---------- Super-title ----------
+    plt.suptitle(
+        'B-Spline MILP  \u2022  Closed-Loop RHC  \u2022  SE(3) Geometric Control  \u2022  Dryden Wind'
+        '      [SPACE \u2192 pause / rotate]',
+        color=C_TXT, fontsize=10, fontweight='bold', y=0.99)
+
+    # ------------------------------------------------------------------ #
+    #  Animation update                                                    #
+    # ------------------------------------------------------------------ #
+
+    def on_key(event):
+        if event.key == ' ':
+            paused[0] = not paused[0]
+            status = 'PAUSED \u2014 rotate/zoom freely' if paused[0] else 'PLAYING'
+            print(f'  [{status}]  press SPACE to toggle')
+
+    fig.canvas.mpl_connect('key_press_event', on_key)
+
     def update(frame):
-        if frame >= N_frames:
-            return trail3d, drone3d, trail2d, dot2d, time_txt, ln_speed, ln_alt, ln_err
+        if paused[0]:
+            return ()
+        if frame >= N:
+            return (trail3d, drone_body, trail2d, dot2d, trail_xz, dot_xz,
+                    hud_txt, ln_alt, ln_spd, ln_err)
 
-        pos  = a_pos[frame]
-        t_f  = a_t[frame]
-        spd  = np.linalg.norm(a_vel[frame])
-        alt  = pos[2]
+        pos = a_pos[frame]
+        t_f = a_t[frame]
+        spd = np.linalg.norm(a_vel[frame])
+        alt = pos[2]
+        phi, theta, psi = a_eul[frame]
+        w_acc = a_wind[frame]
 
-        # tracking error against reference
-        ref_idx = min(int(t_f / dt_ref_s2), len(ref_pos)-1)
+        ref_idx = min(int(t_f / dt_ref_s), len(ref_pos) - 1)
         err = np.linalg.norm(pos - ref_pos[ref_idx])
 
-        # --- trail indices ---
+        # ---- 3D trail ----
         lo = max(0, frame - trail_len)
-        hi = frame + 1
+        trail3d.set_data(a_pos[lo:frame+1, 0], a_pos[lo:frame+1, 1])
+        trail3d.set_3d_properties(a_pos[lo:frame+1, 2])
 
-        # --- 3D update ---
-        trail3d.set_data(a_pos[lo:hi, 0], a_pos[lo:hi, 1])
-        trail3d.set_3d_properties(a_pos[lo:hi, 2])
+        # ---- Drone body dot ----
+        drone_body._offsets3d = ([pos[0]], [pos[1]], [pos[2]])
 
-        drone3d._offsets3d = ([pos[0]], [pos[1]], [pos[2]])
+        # ---- Slow camera drift ----
+        ax3d.view_init(elev=24 + 5 * np.sin(t_f * 0.04),
+                       azim=-50 + t_f * 0.15)
 
-        time_txt.set_text(
-            f't = {t_f:6.1f} s\n'
-            f'pos ({pos[0]:+.0f}, {pos[1]:+.0f}, {pos[2]:.1f}) m\n'
-            f'spd {spd:.1f} m/s   alt {alt:.1f} m\n'
-            f'err {err:.2f} m'
+        # ---- HUD ----
+        mode = '\u2191 FLY-OVER' if alt > 18 else '\u2194 LATERAL'
+        hud_txt.set_text(
+            f'  t   = {t_f:6.1f} s\n'
+            f'  X   = {pos[0]:+7.0f} m\n'
+            f'  Y   = {pos[1]:+7.0f} m\n'
+            f'  Z   = {pos[2]:6.2f} m\n'
+            f'  spd = {spd:6.1f} m/s\n'
+            f'  err = {err:6.2f} m\n'
+            f'  wind= {np.linalg.norm(w_acc):5.2f} m/s\u00b2\n'
+            f'  mode: {mode}'
         )
 
-        # smooth camera rotation
-        ax3d.view_init(elev=22 + 8*np.sin(t_f*0.03),
-                       azim=-55 + t_f * 0.15)
-
-        # --- 2D update ---
-        trail2d.set_data(a_pos[lo:hi, 0], a_pos[lo:hi, 1])
+        # ---- 2D Top-Down trail + dot ----
+        trail2d.set_data(a_pos[lo:frame+1, 0], a_pos[lo:frame+1, 1])
         dot2d.set_data([pos[0]], [pos[1]])
 
-        # --- telemetry update ---
+        # ---- 2D Side Elevation trail + dot ----
+        trail_xz.set_data(a_pos[lo:frame+1, 0], a_pos[lo:frame+1, 2])
+        dot_xz.set_data([pos[0]], [pos[2]])
+
+        # ---- Telemetry ----
         buf_t.append(t_f)
-        buf_spd.append(spd)
         buf_alt.append(alt)
-        buf_err.append(err * 5)   # scale for visibility
+        buf_spd.append(spd)
+        buf_err.append(err * 5)
+        if len(buf_t) > TEL_WIN:
+            buf_t.pop(0); buf_alt.pop(0)
+            buf_spd.pop(0); buf_err.pop(0)
 
-        if len(buf_t) > tel_len:
-            buf_t.pop(0); buf_spd.pop(0); buf_alt.pop(0); buf_err.pop(0)
-
-        ln_speed.set_data(buf_t, buf_spd)
         ln_alt.set_data(buf_t, buf_alt)
+        ln_spd.set_data(buf_t, buf_spd)
         ln_err.set_data(buf_t, buf_err)
-        ax_tel.set_xlim(max(0, t_f - tel_len*dt_anim), t_f + 1)
-        ax_tel.set_ylim(0, max(80, spd + 10, alt + 10))
+        ax_tel.set_xlim(max(0, t_f - TEL_WIN * dt_anim), t_f + 2)
+        ax_tel.set_ylim(0, max(35, spd + 5))
 
-        return trail3d, drone3d, trail2d, dot2d, time_txt, ln_speed, ln_alt, ln_err
+        return (trail3d, drone_body, trail2d, dot2d, trail_xz, dot_xz,
+                hud_txt, ln_alt, ln_spd, ln_err)
 
+    # ------------------------------------------------------------------ #
+    #  Launch                                                              #
+    # ------------------------------------------------------------------ #
     interval_ms = int(1000 / ANIM_FPS)
-    # Store on fig to prevent garbage collection before plt.show() runs
-    fig._anim = FuncAnimation(fig, update, frames=N_frames,
-                              interval=interval_ms, blit=False, repeat=False)
+    fig._anim = FuncAnimation(fig, update, frames=N,
+                               interval=interval_ms, blit=False, repeat=False)
 
-    print(f"\n[Phase 3] Opening live GUI ({N_frames} frames @ {ANIM_FPS} fps, "
-          f"speed x{SPEED_MULT})  --  close window to exit.\n")
-    # Use subplots_adjust instead of tight_layout (avoids 3D axis warning)
-    fig.subplots_adjust(left=0.05, right=0.97, top=0.93, bottom=0.08,
-                        hspace=0.38, wspace=0.32)
+    print(f"\n[Phase 3] Launching GUI ({N} frames @ {ANIM_FPS} fps, "
+          f"speed x{SPEED_MULT:.0f}) -- close window to exit.\n")
+
+    if save_mp4:
+        saved = False
+        print("Saving animation ...")
+        try:
+            fig._anim.save('flight.mp4', writer='ffmpeg', fps=ANIM_FPS,
+                            dpi=100, savefig_kwargs={'facecolor': C_BG})
+            print("  Saved -> flight.mp4")
+            saved = True
+        except Exception as e:
+            print(f"  ffmpeg unavailable, saving GIF ...")
+        if not saved:
+            try:
+                fig._anim.save('flight.gif', writer='pillow', fps=ANIM_FPS,
+                                dpi=80, savefig_kwargs={'facecolor': C_BG})
+                print("  Saved -> flight.gif")
+            except Exception as e2:
+                print(f"  GIF save failed: {e2}")
+
     plt.show()
     print("Done.")
 
