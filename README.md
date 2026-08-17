@@ -1,7 +1,15 @@
 ## B-Spline Trajectory Planning with MILP Obstacle Avoidance and Geometric Control
+![alt text](AMRIT-removebg-preview_2.png)
+
+## **22AIE448 - Data Driven Control of Drones — Semester 5**  
+## TEAM AB6
+CB.SC.U4AIE24023 - KIRUTHIKPRANAV\
+CB.SC.U4AIE24040 - PULIPATI CHAITHANYA\
+CB.SC.U4AIE24060 - VIKRAMENDRAA SHANMUGAVELU THIYAGARAJAN\
+CB.SC.U4AIE24141 - NEERAJ T\
+CB.SC.U4AIE24153 - THAMMINI VARUN
 
 
-> **Course Project — Semester 5**  
 > Implements and extends the method from:  
 > *A. R. Babaei and M. Karimi, "Optimal Trajectory-Planning of UAVs via B-Splines and Disjunctive Programming" 2018.* - https://arxiv.org/pdf/1807.02931
 
