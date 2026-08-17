@@ -13,3 +13,4 @@ __pycache__/
 # Ignore OS-specific files
 Thumbs.db
 .DS_Store
+*.pyc
