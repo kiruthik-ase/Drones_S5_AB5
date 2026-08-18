@@ -171,6 +171,7 @@ The optimisation solved at each horizon is:
 $$\min_{Q} \quad w_1 \sum_{i=1}^{h} \|\mathbf{X}_{i+1} - \mathbf{X}_i\|_1 + w_2 \|\mathbf{X}_h - \mathbf{x}_f\|_1 + w_3 \sum_{i=1}^h \mathbf{X}_i[z] + w_4 \sum_{i=1}^h \|\text{Jerk}_i\|_1$$
 
 subject to:
+
 - **Initial conditions:** $\mathbf{X}_0 = \mathbf{p}_{actual},\ \mathbf{V}_0 = \dot{\mathbf{p}}_{actual},\ \mathbf{A}_0 = \ddot{\mathbf{p}}_{plan}$
 - **Velocity limits:** $\|\mathbf{V}_i\| \leq v_{max} = 60\,\text{m/s}$
 - **Acceleration limits:** $\|\mathbf{A}_i\| \leq a_{max} = 14.715\,\text{m/s}^2\ (\approx 1.5g)$
