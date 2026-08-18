@@ -299,12 +299,7 @@ The following components are **original extensions** not present in the referenc
 | **6-DOF Quadrotor Dynamics** | Full rigid-body simulation with RK4 at 500 Hz. The paper only plans trajectories; we simulate whether a real drone could follow them. |
 | **Geometric Controller (SE3)** | Lee et al. (2010) attitude and position controller that operates on the rotation manifold SO(3), avoiding gimbal-lock singularities. |
 | **Dryden Wind Turbulence** | First-order Markov wind disturbance model. The drone is persistently pushed off-course and must actively correct. |
-| **Dynamic Obstacle (intruder UAV)** | A second UAV flies across the scene at constant velocity. Its predicted position is injected as a temporary NFZ at each horizon. If it causes infeasibility, the planner gracefully retries without it. |
 | **Dense Urban Canyon Scenario** | 14 buildings + 4 NFZs in a complex S-curve layout requiring 7 distinct lateral manoeuvres. The paper only shows simple 2–3 building scenarios. |
-| **Interactive 3D HTML viewer** | `trajectory_3d.html` — fully rotatable browser-based 3D view using Plotly, useful for inspecting the flight path from any angle. |
-| **Result Caching** | Simulation results are compressed and cached to `simulation_cache.npz`. The visualiser loads in 0.06s instead of re-running the 90-second MILP computation. |
-| **Live GUI Visualiser** | Real-time animation with tilted drone body, wind vector, HUD telemetry, telemetry strip charts, and spacebar-pause for 3D view rotation. |
-
 ---
 
 ## 6. Scenario: Mixed-Height Urban Canyon
