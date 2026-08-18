@@ -122,7 +122,7 @@ where $Q \in \mathbb{R}^{n_c \times 3}$ is the matrix of all control points and 
 
 ---
 
-### 3.2 MILP Obstacle Avoidance (from Paper)
+### 3.2 MILP(Mixed Integer Linear Programming) Obstacle Avoidance (from Paper)
 
 This is the **core contribution of the reference paper**. To avoid a 3D box obstacle (cuboid), the drone must be **outside** at least one face. This is a non-convex constraint because of the "OR" logic — but it can be linearised using **Big-M disjunctive programming**.
 
