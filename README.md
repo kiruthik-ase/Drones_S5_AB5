@@ -186,7 +186,7 @@ $$\mathbf{s} = \begin{bmatrix} \mathbf{p} \\ \dot{\mathbf{p}} \\ \boldsymbol{\Ph
 
 **Translational Dynamics** (Newton's second law + wind disturbance):
 
-$$m\ddot{\mathbf{p}} = \mathbf{R}\begin{bmatrix}0\\0\\T\end{bmatrix} - mg\mathbf{e}_3 + m\mathbf{w}$$
+$$m\ddot{\mathbf{p}} = \mathbf{R}\begin{bmatrix}0\cr0\cr T\end{bmatrix} - mg\mathbf{e}_3 + m\mathbf{w}$$
 
 where $T$ is total thrust, $\mathbf{R} \in SO(3)$ is the rotation matrix, and $\mathbf{w}$ is the wind acceleration disturbance.
 
@@ -198,7 +198,7 @@ $$\mathbf{R} = R_z(\psi)\,R_y(\theta)\,R_x(\phi) = \begin{bmatrix} c_\psi c_\the
 
 $$\mathbf{I}\dot{\boldsymbol{\omega}} = \boldsymbol{\tau} - \boldsymbol{\omega} \times (\mathbf{I}\boldsymbol{\omega})$$
 
-where $\mathbf{I} = \text{diag}(I_{xx}, I_{yy}, I_{zz}) = \text{diag}(0.0196,\, 0.0196,\, 0.0264)\,\text{kg·m}^2$.
+where $\mathbf{I} = \text{diag}(0.0196, 0.0196, 0.0264)\,\text{kg}\cdot\text{m}^2$.
 
 **Euler Angle Kinematics:**
 
