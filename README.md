@@ -172,11 +172,10 @@ $$\min_{Q} \quad w_1 \sum_{i=1}^{h} \|\mathbf{X}_{i+1} - \mathbf{X}_i\|_1 + w_2 
 
 subject to:
 - **Initial conditions:** $\mathbf{X}_0 = \mathbf{p}_{actual},\ \mathbf{V}_0 = \dot{\mathbf{p}}_{actual},\ \mathbf{A}_0 = \ddot{\mathbf{p}}_{plan}$
-- **Velocity limits:** $|\mathbf{V}_i| \leq v_{max} = 60\,\text{m/s}$
-- **Acceleration limits:** $|\mathbf{A}_i| \leq a_{max} = 14.715\,\text{m/s}^2\ (\approx 1.5g)$
-- **Altitude bounds:** $1\,\text{m} \leq \mathbf{X}_i[z] \leq 25\,\text{m}$
+- **Velocity limits:** $\|\mathbf{V}_i\| \leq v_{max} = 60\,\text{m/s}$
+- **Acceleration limits:** $\|\mathbf{A}_i\| \leq a_{max} = 14.715\,\text{m/s}^2\ (\approx 1.5g)$
+- **Altitude bounds:** $1\,\text{m} \leq X_i[z] \leq 25\,\text{m}$
 - **Big-M obstacle avoidance:** (as described in §3.2)
-
 ---
 
 ### 3.4 6-DOF Quadrotor Dynamics
