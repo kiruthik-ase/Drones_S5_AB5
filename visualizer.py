@@ -59,6 +59,8 @@ C_GRID    = '#21262d'   # grid lines
 C_ALT     = '#d2a8ff'   # altitude line (purple)
 C_SPD     = '#79c0ff'   # speed line
 C_ERR     = '#ff7b72'   # error line
+C_ROLL    = '#f0c040'   # roll angle (gold)
+C_PITCH   = '#56d364'   # pitch angle (lime green)
 
 
 # ======================================================================= #
@@ -184,18 +186,20 @@ def main():
     except Exception:
         pass
 
-    gs = gridspec.GridSpec(3, 2, width_ratios=[1.65, 1],
-                           hspace=0.45, wspace=0.22,
+    gs = gridspec.GridSpec(4, 2, width_ratios=[1.65, 1],
+                           hspace=0.52, wspace=0.22,
                            left=0.03, right=0.97, top=0.93, bottom=0.06)
 
-    ax3d  = fig.add_subplot(gs[:, 0], projection='3d')
-    ax_xy = fig.add_subplot(gs[0, 1])
-    ax_xz = fig.add_subplot(gs[1, 1])
+    ax3d   = fig.add_subplot(gs[:, 0], projection='3d')
+    ax_xy  = fig.add_subplot(gs[0, 1])
+    ax_xz  = fig.add_subplot(gs[1, 1])
     ax_tel = fig.add_subplot(gs[2, 1])
+    ax_tilt = fig.add_subplot(gs[3, 1])
 
     style_2d_ax(ax_xy)
     style_2d_ax(ax_xz)
     style_2d_ax(ax_tel)
+    style_2d_ax(ax_tilt)
     ax3d.set_facecolor(C_BG)
 
     # ---------- Compute z_ceil for distinguishing tall vs short ----------
@@ -345,7 +349,23 @@ def main():
     ax_tel.legend(fontsize=6.5, facecolor=C_PANEL, labelcolor=C_TXT,
                   framealpha=0.9, edgecolor=C_BORDER, loc='upper right')
 
+    # ---------- Drone Tilt (Roll / Pitch) ----------
+    ax_tilt.set_xlabel('Sim time (s)', fontsize=7.5)
+    ax_tilt.set_title('Drone Tilt  (Roll φ  |  Pitch θ)',
+                      color=C_TXT, fontsize=9.5, fontweight='bold')
+    ax_tilt.axhline(0, color=C_BORDER, lw=0.8, ls='--', alpha=0.7)   # zero reference
+    ax_tilt.axhline( 20, color=C_ERR, lw=0.5, ls=':', alpha=0.4)     # +20° soft limit
+    ax_tilt.axhline(-20, color=C_ERR, lw=0.5, ls=':', alpha=0.4)     # -20° soft limit
+
+    ln_roll,  = ax_tilt.plot([], [], '-', color=C_ROLL,  lw=1.6, label='Roll φ (°)')
+    ln_pitch, = ax_tilt.plot([], [], '-', color=C_PITCH, lw=1.6, label='Pitch θ (°)')
+    ax_tilt.set_ylabel('Angle (°)', fontsize=7.5, color=C_TXT2)
+    ax_tilt.set_ylim(-35, 35)
+    ax_tilt.legend(fontsize=6.5, facecolor=C_PANEL, labelcolor=C_TXT,
+                   framealpha=0.9, edgecolor=C_BORDER, loc='upper right')
+
     buf_t = []; buf_alt = []; buf_spd = []; buf_err = []
+    buf_roll = []; buf_pitch = []
     TEL_WIN = 350
 
     # ---------- Super-title ----------
@@ -371,7 +391,7 @@ def main():
             return ()
         if frame >= N:
             return (trail3d, drone_body, trail2d, dot2d, trail_xz, dot_xz,
-                    hud_txt, ln_alt, ln_spd, ln_err)
+                    hud_txt, ln_alt, ln_spd, ln_err, ln_roll, ln_pitch)
 
         pos = a_pos[frame]
         t_f = a_t[frame]
@@ -431,8 +451,23 @@ def main():
         ax_tel.set_xlim(max(0, t_f - TEL_WIN * dt_anim), t_f + 2)
         ax_tel.set_ylim(0, max(35, spd + 5))
 
+        # ---- Drone Tilt (Roll / Pitch in degrees) ----
+        roll_deg  = np.degrees(phi)
+        pitch_deg = np.degrees(theta)
+        buf_roll.append(roll_deg)
+        buf_pitch.append(pitch_deg)
+        if len(buf_roll) > TEL_WIN:
+            buf_roll.pop(0); buf_pitch.pop(0)
+
+        ln_roll.set_data(buf_t, buf_roll)
+        ln_pitch.set_data(buf_t, buf_pitch)
+        # Dynamic y-limit: keep ±35° headroom, expand if needed
+        max_ang = max(35.0, abs(roll_deg) + 5, abs(pitch_deg) + 5)
+        ax_tilt.set_xlim(max(0, t_f - TEL_WIN * dt_anim), t_f + 2)
+        ax_tilt.set_ylim(-max_ang, max_ang)
+
         return (trail3d, drone_body, trail2d, dot2d, trail_xz, dot_xz,
-                hud_txt, ln_alt, ln_spd, ln_err)
+                hud_txt, ln_alt, ln_spd, ln_err, ln_roll, ln_pitch)
 
     # ------------------------------------------------------------------ #
     #  Launch                                                              #
