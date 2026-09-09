@@ -92,6 +92,7 @@ def build_scenario(planner):
     planner.add_cuboid_obstacle(-1800,-1400,  1000,  1300, 0, bh_tall, eta=e_tall) # D-south
     planner.add_cuboid_obstacle(-1800,-1400,  1700,  2000, 0, bh_tall, eta=e_tall) # D-north
 
+
     # ================================================================== #
     #  NO-FLY ZONES  (3 zones -- all clear of start/goal positions)       #
     # ================================================================== #
