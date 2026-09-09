@@ -92,35 +92,6 @@ def build_scenario(planner):
     planner.add_cuboid_obstacle(-1800,-1400,  1000,  1300, 0, bh_tall, eta=e_tall) # D-south
     planner.add_cuboid_obstacle(-1800,-1400,  1700,  2000, 0, bh_tall, eta=e_tall) # D-north
 
-    # ================================================================== #
-    #  TALL GATE E  -- x ~ 600                                            #
-    #  Extra lateral chicane between Hurdle-2 and Gate-B                  #
-    # ================================================================== #
-    #   path at x=600: y = 200 - 0.8*600 = -280
-    planner.add_cuboid_obstacle( 450,  750, -900,  -600, 0, bh_tall, eta=e_tall)  # E-south
-    planner.add_cuboid_obstacle( 450,  750,   50,   350, 0, bh_tall, eta=e_tall)  # E-north
-
-    # ================================================================== #
-    #  SHORT HURDLE H  -- x ~ 1750                                        #
-    #  Extra low wall between Gate-A and Hurdle-1                         #
-    # ================================================================== #
-    #   path at x=1750: y = 200 - 0.8*1750 = -1200
-    planner.add_cuboid_obstacle(1650, 1850, -1800, -300, 0, bh_low, eta=e_low)    # hurdle-H
-
-    # ================================================================== #
-    #  TALL GATE G  -- x ~ -600                                           #
-    #  Extra lateral chicane between Hurdle-3 and Gate-C                  #
-    # ================================================================== #
-    #   path at x=-600: y = 200 - 0.8*(-600) = 680
-    planner.add_cuboid_obstacle(-750, -450,   150,  450, 0, bh_tall, eta=e_tall)  # G-south
-    planner.add_cuboid_obstacle(-750, -450,   950, 1250, 0, bh_tall, eta=e_tall)  # G-north
-
-    # ================================================================== #
-    #  SHORT HURDLE F  -- x ~ -1200                                       #
-    #  Extra fly-over challenge between Gate-C and Gate-D                 #
-    # ================================================================== #
-    #   path at x=-1200: y = 200 - 0.8*(-1200) = 1160
-    planner.add_cuboid_obstacle(-1350,-1050,  100, 1900, 0, bh_low, eta=e_low)    # hurdle-F
 
     # ================================================================== #
     #  NO-FLY ZONES  (3 zones -- all clear of start/goal positions)       #
