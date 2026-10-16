@@ -18,7 +18,28 @@
 
 ---
 
-## Abstract
+## Table of Contents
+
+1. [Project Overview](#1-project-overview)
+2. [System Architecture](#2-system-architecture)
+3. [Mathematical Foundations](#3-mathematical-foundations)
+   - [3.1 B-Spline Trajectory](#31-b-spline-trajectory)
+   - [3.2 MILP Obstacle Avoidance](#32-milp-obstacle-avoidance)
+   - [3.3 Receding Horizon Control](#33-receding-horizon-control)
+   - [3.4 6-DOF Quadrotor Dynamics](#34-6-dof-quadrotor-dynamics)
+   - [3.5 Geometric Controller on SE(3)](#35-geometric-controller-on-se3)
+   - [3.6 Dryden Wind Turbulence Model](#36-dryden-wind-turbulence-model)
+4. [What We Implemented from the Paper](#4-what-we-implemented-from-the-paper)
+5. [What We Added Beyond the Paper](#5-what-we-added-beyond-the-paper)
+6. [Scenario: Urban Canyon](#6-scenario-urban-canyon)
+7. [File Structure](#7-file-structure)
+8. [Setup and Running](#8-setup-and-running)
+9. [Output Files](#9-output-files)
+10. [Key Parameters](#10-key-parameters)
+11. [References](#11-references)
+
+---
+
 
 This project presents a complete, closed-loop autonomous UAV navigation system for a complex mixed-height urban environment. The work implements and extends the B-spline trajectory planning framework of Babaei & Karimi (2018), which formulates collision-free trajectory generation as a **Mixed-Integer Linear Program (MILP)** using Big-M disjunctive programming to encode non-convex obstacle avoidance constraints.
 
@@ -102,31 +123,9 @@ After 2 seconds (1000 physics steps), the actual wind-disturbed drone position a
 **Step 7 — Output Generation**  
 After all RHC horizons complete, `simulation.py` generates a 6-panel publication figure, a standalone interactive Plotly 3D HTML viewer, and a compressed `.npz` cache. `visualizer.py` plays back the full animation with a live 3D scene, 2D top-down map, and telemetry HUD.
 
----
-
-## Table of Contents
-
-1. [Project Overview](#1-project-overview)
-2. [System Architecture](#2-system-architecture)
-3. [Mathematical Foundations](#3-mathematical-foundations)
-   - [3.1 B-Spline Trajectory](#31-b-spline-trajectory)
-   - [3.2 MILP Obstacle Avoidance](#32-milp-obstacle-avoidance)
-   - [3.3 Receding Horizon Control](#33-receding-horizon-control)
-   - [3.4 6-DOF Quadrotor Dynamics](#34-6-dof-quadrotor-dynamics)
-   - [3.5 Geometric Controller on SE(3)](#35-geometric-controller-on-se3)
-   - [3.6 Dryden Wind Turbulence Model](#36-dryden-wind-turbulence-model)
-4. [What We Implemented from the Paper](#4-what-we-implemented-from-the-paper)
-5. [What We Added Beyond the Paper](#5-what-we-added-beyond-the-paper)
-6. [Scenario: Urban Canyon](#6-scenario-urban-canyon)
-7. [File Structure](#7-file-structure)
-8. [Setup and Running](#8-setup-and-running)
-9. [Output Files](#9-output-files)
-10. [Key Parameters](#10-key-parameters)
-11. [References](#11-references)
-
----
 
 ## 1. Project Overview
+
 
 This project simulates an autonomous UAV navigating ~6 km through a **mixed-height urban canyon** with tall skyscrapers, low wide hurdles, and restricted No-Fly Zones — all while fighting persistent wind turbulence.
 
@@ -290,9 +289,9 @@ $$\min_{Q} \;\; w_1 \sum_{i=0}^{h-1} \|\mathbf{X}_{i+1} - \mathbf{X}_i\|_1 \;+\;
 
 The drone is modelled as a rigid body with a **12-dimensional state vector:**
 
-$$\mathbf{s} = \begin{bmatrix} \mathbf{p} \\ \dot{\mathbf{p}} \\ \boldsymbol{\Phi} \\ \boldsymbol{\omega} \end{bmatrix} = \begin{bmatrix} x,\, y,\, z \\ v_x,\, v_y,\, v_z \\ \phi,\, \theta,\, \psi \\ p,\, q,\, r \end{bmatrix}$$
+$$\mathbf{s} = \begin{bmatrix} \mathbf{p} \\ \dot{\mathbf{p}} \\ \pmb{\Phi} \\ \pmb{\omega} \end{bmatrix} = \begin{bmatrix} x,\, y,\, z \\ v_x,\, v_y,\, v_z \\ \phi,\, \theta,\, \psi \\ p,\, q,\, r \end{bmatrix}$$
 
-where $\boldsymbol{\Phi} = (\phi,\theta,\psi)$ are ZYX Euler angles (roll, pitch, yaw) and $\boldsymbol{\omega} = (p,q,r)$ are body angular rates.
+where $\pmb{\Phi} = (\phi,\theta,\psi)$ are ZYX Euler angles (roll, pitch, yaw) and $\pmb{\omega} = (p,q,r)$ are body angular rates.
 
 **Translational dynamics** (Newton's 2nd law + wind):
 
@@ -306,9 +305,9 @@ $$\mathbf{R} = R_z(\psi)\,R_y(\theta)\,R_x(\phi)$$
 
 **Rotational dynamics** (Euler's equation):
 
-$$\mathbf{I}\dot{\boldsymbol{\omega}} = \boldsymbol{\tau} - \boldsymbol{\omega} \times (\mathbf{I}\boldsymbol{\omega})$$
+$$\mathbf{I}\dot{\pmb{\omega}} = \pmb{\tau} - \pmb{\omega} \times (\mathbf{I}\pmb{\omega})$$
 
-where $\mathbf{I} = \text{diag}(0.0196,\; 0.0196,\; 0.0264)\;\text{kg m}^2$ and $\boldsymbol{\tau}$ is the control torque vector.
+where $\mathbf{I} = \text{diag}(0.0196,\; 0.0196,\; 0.0264)\;\text{kg m}^2$ and $\pmb{\tau}$ is the control torque vector.
 
 **Numerical integration** — 4th-order Runge-Kutta at $\delta t = 0.002\,\text{s}$ (500 Hz):
 
@@ -352,9 +351,9 @@ The **vee map** extracts a 3-vector from a skew-symmetric matrix: $\text{vee}(S)
 
 **⑤ Control torques:**
 
-$$\boldsymbol{\tau} = -K_R\,\mathbf{e}_R - K_\omega\,\mathbf{e}_\omega + \boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}$$
+$$\pmb{\tau} = -K_R\,\mathbf{e}_R - K_\omega\,\mathbf{e}_\omega + \pmb{\omega} \times \mathbf{I}\pmb{\omega}$$
 
-Gains: $K_R = \text{diag}(120,120,60)$, $K_\omega = \text{diag}(16,16,8)$ → $\omega_n \approx 30\,\text{rad/s}$ (attitude loop is ~7.5× faster than position loop). The $\boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}$ term cancels gyroscopic effects.
+Gains: $K_R = \text{diag}(120,120,60)$, $K_\omega = \text{diag}(16,16,8)$ → $\omega_n \approx 30\,\text{rad/s}$ (attitude loop is ~7.5× faster than position loop). The $\pmb{\omega} \times \mathbf{I}\pmb{\omega}$ term cancels gyroscopic effects.
 
 ---
 
@@ -364,12 +363,12 @@ Gains: $K_R = \text{diag}(120,120,60)$, $K_\omega = \text{diag}(16,16,8)$ → $\
 
 Wind is modelled as a **first-order Markov (auto-regressive) process**, inspired by MIL-HDBK-1797:
 
-$$\mathbf{w}[k] = \rho\,\mathbf{w}[k-1] + \boldsymbol{\sigma} \odot \sqrt{1-\rho^2}\;\mathbf{n}[k], \qquad \mathbf{n}[k] \sim \mathcal{N}(\mathbf{0},\mathbf{I})$$
+$$\mathbf{w}[k] = \rho\,\mathbf{w}[k-1] + \pmb{\sigma} \odot \sqrt{1-\rho^2}\;\mathbf{n}[k], \qquad \mathbf{n}[k] \sim \mathcal{N}(\mathbf{0},\mathbf{I})$$
 
 | Parameter | Value | Effect |
 |---|---|---|
 | $\rho$ | 0.995 | High autocorrelation → slow, persistent gusts |
-| $\boldsymbol{\sigma}$ | $[1.8,\; 1.8,\; 0.4]\;\text{m/s}^2$ | Horizontal turbulence >> vertical |
+| $\pmb{\sigma}$ | $[1.8,\; 1.8,\; 0.4]\;\text{m/s}^2$ | Horizontal turbulence >> vertical |
 | Seed | 42 | Fully reproducible runs |
 
 The wind acceleration $\mathbf{w}$ is injected directly into the translational dynamics at every 2 ms physics step. Because the RHC planner uses the **actual** wind-pushed position at each replanning step, accumulated drift is corrected every 2 seconds automatically.
@@ -537,7 +536,7 @@ pip install -r requirements.txt
 | Safety margin (NFZ) | $\gamma$ | 30 m | `scenario.py` | Clearance from NFZ boundary |
 | Big-M constant | $M$ | 10 000 | `planner_obstacles.py` | Disjunctive constraint relaxation |
 | Wind autocorrelation | $\rho$ | 0.995 | `quadrotor.py` | Slow, persistent gusts |
-| Wind std-dev | $\boldsymbol{\sigma}$ | [1.8, 1.8, 0.4] m/s² | `quadrotor.py` | Turbulence intensity |
+| Wind std-dev | $\pmb{\sigma}$ | [1.8, 1.8, 0.4] m/s² | `quadrotor.py` | Turbulence intensity |
 | Position gain | $K_p$ | diag(16, 16, 20) | `controller.py` | $\omega_n \approx 4$ rad/s |
 | Velocity gain | $K_v$ | diag(8, 8, 9) | `controller.py` | Critical damping |
 | Attitude gain | $K_R$ | diag(120, 120, 60) | `controller.py` | $\omega_n \approx 30$ rad/s |
