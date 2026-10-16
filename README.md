@@ -222,7 +222,7 @@ $$\mathbf{R} = R_z(\psi)\,R_y(\theta)\,R_x(\phi)$$
 
 $$\mathbf{I}\dot{\boldsymbol{\omega}} = \boldsymbol{\tau} - \boldsymbol{\omega} \times (\mathbf{I}\boldsymbol{\omega})$$
 
-where $\mathbf{I} = \text{diag}(0.0196,\; 0.0196,\; 0.0264)\;\text{kg·m}^2$ and $\boldsymbol{\tau}$ is the control torque vector.
+where $\mathbf{I} = \text{diag}(0.0196,\; 0.0196,\; 0.0264)\;\text{kg m}^2$ and $\boldsymbol{\tau}$ is the control torque vector.
 
 **Numerical integration** — 4th-order Runge-Kutta at $\delta t = 0.002\,\text{s}$ (500 Hz):
 
