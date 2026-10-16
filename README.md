@@ -18,6 +18,92 @@
 
 ---
 
+## Abstract
+
+This project presents a complete, closed-loop autonomous UAV navigation system for a complex mixed-height urban environment. The work implements and extends the B-spline trajectory planning framework of Babaei & Karimi (2018), which formulates collision-free trajectory generation as a **Mixed-Integer Linear Program (MILP)** using Big-M disjunctive programming to encode non-convex obstacle avoidance constraints.
+
+Unlike the original paper — which operates open-loop with pre-computed paths — this implementation integrates the MILP planner into a true **Receding Horizon Control (RHC)** loop that continuously re-plans from the actual, wind-disturbed drone state every 2 seconds. The UAV is modelled as a **6-DOF rigid body** simulated at 500 Hz using 4th-order Runge-Kutta integration, subject to a Dryden atmospheric wind turbulence model. Trajectory tracking is achieved by a **Geometric Controller on SE(3)** (Lee et al., CDC 2010) that operates directly on the rotation manifold SO(3), avoiding Euler-angle singularities.
+
+The system successfully navigates a ~6 km urban canyon containing 14 buildings (up to 200 m tall), 4 No-Fly Zones, and persistent wind gusts — demonstrating that the B-spline MILP approach scales to realistic, large-scale autonomous flight when combined with closed-loop feedback and physics-based simulation.
+
+---
+
+## Objectives
+
+1. **Implement the Paper's Core Algorithm** — Reproduce the B-spline MILP trajectory planner from Babaei & Karimi (2018), including the Cox-de Boor basis function formulation and Big-M disjunctive constraints for 3D cuboid and 2D NFZ obstacle avoidance.
+
+2. **Extend to True Closed-Loop Control** — Integrate the MILP planner into a Receding Horizon Control loop so that the drone continuously re-plans from its **actual** state rather than from an idealized predicted state, correcting for wind drift at every horizon.
+
+3. **Simulate Realistic Quadrotor Dynamics** — Model the UAV as a full 6-DOF rigid body with coupled translational and rotational dynamics, integrated using RK4 at 500 Hz, to validate whether a physical drone can actually track the planned B-spline references.
+
+4. **Implement Robust Atmospheric Disturbance Rejection** — Inject a Dryden Markov wind turbulence model ($\rho = 0.995$, $\boldsymbol{\sigma} = [1.8,\; 1.8,\; 0.4]\;\text{m/s}^2$) and verify that the closed-loop system compensates for persistent gusts without trajectory divergence.
+
+5. **Design a Singularity-Free Tracking Controller** — Implement the geometric tracking controller of Lee et al. (2010) on the Special Euclidean group SE(3) to avoid the gimbal-lock singularities inherent in Euler-angle PID approaches.
+
+6. **Validate on a Complex Urban Scenario** — Test the full system on a ~6 km urban canyon with 14 buildings of mixed heights (200 m towers + 15 m hurdles) and 4 restricted NFZs, demonstrating both lateral and vertical obstacle avoidance manoeuvres in a single mission.
+
+---
+
+## Overall Methodology
+
+The project follows a four-layer pipeline, executed at two distinct time-scales:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 0 — MISSION DEFINITION           (once at startup)   │
+│  scenario.py: buildings, NFZs, start, goal, UAV parameters  │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼  every 2 seconds
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 1 — RECEDING HORIZON ORCHESTRATOR  (core.py)         │
+│                                                             │
+│  actual state ──▶ MILP Planner ──▶ B-spline Q*             │
+│      ▲                                     │               │
+│      │         Physics Simulator           │               │
+│      └──── actual state ◀── SE(3) ctrl ◀───┘               │
+└──────────────────────────┬──────────────────────────────────┘
+                           │  every 0.002 seconds (500 Hz)
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 2A — PLANNER    planner_obstacles.py, bspline_utils  │
+│  LAYER 2B — PHYSICS    quadrotor.py, controller.py          │
+└──────────────────────────┬──────────────────────────────────┘
+                           │  after full mission
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 3 — OUTPUTS     simulation.py, visualizer.py         │
+│  PNG figure, interactive HTML, cached .npz, live GUI        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Step-by-Step Process
+
+**Step 1 — Mission Definition**  
+`scenario.py` defines the static world once: 14 axis-aligned 3D cuboid buildings (tagged as tall gates or low hurdles), 4 cylindrical No-Fly Zones projected to 2D polygons, and the start and goal positions.
+
+**Step 2 — Trajectory Planning (every 2 s)**  
+`planner_obstacles.py` constructs and solves a MILP over a 10-second rolling horizon with $n_c = 14$ B-spline control points as the decision variables. The cost function minimises four competing objectives:
+
+$$\mathcal{J} = \underbrace{w_1 \sum_{i=0}^{h-1}\|\mathbf{X}_{i+1} - \mathbf{X}_i\|_1}_{\text{path length}} + \underbrace{w_2\|\mathbf{X}_h - \mathbf{x}_f\|_1}_{\text{goal attraction}} + \underbrace{w_3\sum_{i=1}^{h}X_i^z}_{\text{altitude penalty}} + \underbrace{w_4\sum_{i=0}^{h-1}\|\Delta\mathbf{J}_i\|_1}_{\text{jerk smoothness}}$$
+
+subject to: obstacle avoidance (Big-M constraints), velocity limits, acceleration limits, and altitude bounds — all linear in the control points $Q$.
+
+**Step 3 — B-Spline Evaluation**  
+The optimal control points $Q^*$ are converted to a dense reference trajectory using the pre-computed basis matrices ($\mathbf{B}$, $\mathbf{B}'$, $\mathbf{B}''$), providing smooth position, velocity, and acceleration references at every 2 ms timestep.
+
+**Step 4 — Physics Simulation (500 Hz)**  
+`quadrotor.py` advances the 12-state quadrotor ($\mathbf{p},\,\dot{\mathbf{p}},\,\boldsymbol{\Phi},\,\boldsymbol{\omega}$) using RK4. At each step, the Dryden wind model injects a persistent stochastic acceleration disturbance into the translational dynamics.
+
+**Step 5 — Geometric Tracking Control (500 Hz)**  
+`controller.py` computes thrust $T$ and torques $\boldsymbol{\tau}$ from the B-spline reference and the actual state using the SE(3) geometric law — projecting desired force onto the body frame, constructing the desired rotation matrix, computing the SO(3) attitude error via the vee map, and applying PD feedback in both position and attitude loops.
+
+**Step 6 — Horizon Rollover**  
+After 2 seconds (1000 physics steps), the actual wind-disturbed drone position and velocity are read back and fed as the initial conditions for the next MILP solve. This feedback loop is what makes the system truly closed-loop and wind-resilient.
+
+**Step 7 — Output Generation**  
+After all RHC horizons complete, `simulation.py` generates a 6-panel publication figure, a standalone interactive Plotly 3D HTML viewer, and a compressed `.npz` cache. `visualizer.py` plays back the full animation with a live 3D scene, 2D top-down map, and telemetry HUD.
+
+---
+
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
