@@ -1,17 +1,20 @@
-## B-Spline Trajectory Planning with MILP Obstacle Avoidance and Geometric Control
-![alt text](AMRIT-removebg-preview_2.png)
+# B-Spline Trajectory Planning with MILP Obstacle Avoidance and Geometric Control
 
-## **22AIE448 - Data Driven Control of Drones — Semester 5**  
-## TEAM AB5
-CB.SC.U4AIE24023 - KIRUTHIKPRANAV\
-CB.SC.U4AIE24040 - PULIPATI CHAITHANYA\
-CB.SC.U4AIE24060 - VIKRAMENDRAA SHANMUGAVELU THIYAGARAJAN\
-CB.SC.U4AIE24141 - NEERAJ T\
-CB.SC.U4AIE24153 - THAMMINI VARUN
+![Team Banner](AMRIT-removebg-preview_2.png)
 
+**22AIE448 — Data Driven Control of Drones · Semester 5**  
+**Team AB5**
 
-> Implements and extends the method from:  
-> *A. R. Babaei and M. Karimi, "Optimal Trajectory-Planning of UAVs via B-Splines and Disjunctive Programming" 2018.* - https://arxiv.org/pdf/1807.02931
+| Roll No. | Name |
+|---|---|
+| CB.SC.U4AIE24023 | Kiruthikpranav |
+| CB.SC.U4AIE24040 | Pulipati Chaithanya |
+| CB.SC.U4AIE24060 | Vikramendraa Shanmugavelu Thiyagarajan |
+| CB.SC.U4AIE24141 | Neeraj T |
+| CB.SC.U4AIE24153 | Thammini Varun |
+
+> **Based on:** *A. R. Babaei and M. Karimi, "Optimal Trajectory-Planning of UAVs via B-Splines and Disjunctive Programming," 2018* · [arxiv.org/pdf/1807.02931](https://arxiv.org/pdf/1807.02931)  
+> **Controller:** *T. Lee, M. Leok, N. H. McClamroch, "Geometric Tracking Control of a Quadrotor UAV on SE(3)," CDC 2010*
 
 ---
 
@@ -20,17 +23,17 @@ CB.SC.U4AIE24153 - THAMMINI VARUN
 1. [Project Overview](#1-project-overview)
 2. [System Architecture](#2-system-architecture)
 3. [Mathematical Foundations](#3-mathematical-foundations)
-   - 3.1 [B-Spline Trajectory Representation](#31-b-spline-trajectory-representation)
-   - 3.2 [MILP Obstacle Avoidance (from Paper)](#32-milp-obstacle-avoidance-from-paper)
-   - 3.3 [Receding Horizon Control (RHC)](#33-receding-horizon-control-rhc)
-   - 3.4 [6-DOF Quadrotor Dynamics](#34-6-dof-quadrotor-dynamics)
-   - 3.5 [Geometric Tracking Controller on SE(3)](#35-geometric-tracking-controller-on-se3)
-   - 3.6 [Wind Turbulence Model (Dryden)](#36-wind-turbulence-model-dryden)
+   - [3.1 B-Spline Trajectory](#31-b-spline-trajectory)
+   - [3.2 MILP Obstacle Avoidance](#32-milp-obstacle-avoidance)
+   - [3.3 Receding Horizon Control](#33-receding-horizon-control)
+   - [3.4 6-DOF Quadrotor Dynamics](#34-6-dof-quadrotor-dynamics)
+   - [3.5 Geometric Controller on SE(3)](#35-geometric-controller-on-se3)
+   - [3.6 Dryden Wind Turbulence Model](#36-dryden-wind-turbulence-model)
 4. [What We Implemented from the Paper](#4-what-we-implemented-from-the-paper)
 5. [What We Added Beyond the Paper](#5-what-we-added-beyond-the-paper)
-6. [Scenario: Mixed-Height Urban Canyon](#6-scenario-mixed-height-urban-canyon)
+6. [Scenario: Urban Canyon](#6-scenario-urban-canyon)
 7. [File Structure](#7-file-structure)
-8. [Project Setup & Execution Guide](#8-project-setup--execution-guide)
+8. [Setup and Running](#8-setup-and-running)
 9. [Output Files](#9-output-files)
 10. [Key Parameters](#10-key-parameters)
 11. [References](#11-references)
@@ -39,415 +42,386 @@ CB.SC.U4AIE24153 - THAMMINI VARUN
 
 ## 1. Project Overview
 
-This project simulates an autonomous UAV navigating through a **mixed-height urban canyon** featuring tall skyscrapers (lateral avoidance), wide low hurdles (fly-over maneuvers), and No-Fly Zones. The drone reaches a goal ~6 km away while:
+This project simulates an autonomous UAV navigating ~6 km through a **mixed-height urban canyon** with tall skyscrapers, low wide hurdles, and restricted No-Fly Zones — all while fighting persistent wind turbulence.
 
-- **Avoiding all static buildings** (using MILP disjunctive constraints)
-- **Avoiding a dynamic no-fly zone** (an intruder UAV crossing its path)
-- **Rejecting wind turbulence** (Dryden atmospheric disturbance model)
-- **Making decisions on-the-fly** using true closed-loop Receding Horizon Control
+The drone handles **three simultaneous challenges:**
 
-The core pipeline is:
+| Challenge | How We Handle It |
+|---|---|
+| 3D buildings in the path | MILP disjunctive constraints (Big-M method) |
+| Restricted airspace (NFZs) | 2D disjunctive constraints per zone |
+| Persistent wind disturbance | Dryden Markov model + closed-loop RHC correction |
+
+**The core control loop:**
 
 ```
-┌──────────────────────────────────────────────────────┐
-│           RECEDING HORIZON CONTROL LOOP               │
-│                                                       │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────┐ │
-│  │ MILP Planner│────▶│  B-Spline   │────▶│6-DOF Sim│ │
-│  │ (horizon)   │     │  Reference  │     │+ Wind   │ │
-│  └─────────────┘     └─────────────┘     └────┬────┘ │
-│         ▲                                      │      │
-│         └─────────── ACTUAL STATE ─────────────┘      │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                RECEDING HORIZON CONTROL LOOP              │
+│                                                          │
+│   ┌──────────────┐   ┌─────────────┐   ┌─────────────┐  │
+│   │ MILP Planner │──▶│  B-Spline   │──▶│  6-DOF Sim  │  │
+│   │  (10s ahead) │   │  Reference  │   │  + Wind     │  │
+│   └──────────────┘   └─────────────┘   └──────┬──────┘  │
+│           ▲                                    │         │
+│           └──────── ACTUAL STATE (with wind) ──┘         │
+└──────────────────────────────────────────────────────────┘
 ```
 
-The planner never sees pre-computed answers — it always starts from the **real, wind-disturbed position** of the drone.
+**Key principle:** The planner always starts from the **real, wind-disturbed position** of the drone — never from a predicted one. This is what makes it truly closed-loop.
 
 ---
 
 ## 2. System Architecture
 
-```
-Drones/
-├── bspline_utils.py      # Cox-de Boor recursion, B-spline matrices & sampling
-├── planner_obstacles.py  # UAVPlannerMILP: MILP formulation (core of paper)
-├── controller.py         # Geometric tracking controller on SE(3) (Lee 2010)
-├── quadrotor.py          # 6-DOF rigid-body dynamics + RK4 + WindModel
-├── dynamic_obstacle.py   # Moving intruder UAV (constant velocity model)
-├── scenario.py           # Scene definition: 14 buildings, 4 NFZs, start/goal
-├── core.py               # run_closed_loop_rhc(): the TRUE closed-loop engine
-├── simulation.py         # Run simulation, save PNG figure + interactive HTML
-└── visualizer.py         # Live 3D animated GUI with HUD and telemetry
-```
+### Full System Diagram
 
-**Data flow at each 2-second horizon:**
+![UAV RHC System Architecture — shows all four layers: mission definition (scenario.py), RHC orchestrator (core.py), MILP planner with B-spline matrices (planner_obstacles.py / bspline_utils.py) running in parallel with the 6-DOF physics simulator and geometric controller (quadrotor.py / controller.py), and all output files generated after the run.](uav_rhc_system_architecture.png)
 
-1. `scenario.py` defines the static map once at startup
-2. `core.py` queries `planner_obstacles.py` with the **actual** drone position
-3. `planner_obstacles.py` solves the MILP and returns a 10-second B-spline
-4. `core.py` runs the 6-DOF physics (`quadrotor.py`) for 2 seconds, tracking the spline with `controller.py`
-5. Wind is injected every physics step. The new **real** position is fed back to step 2.
+> **Reading the diagram:** Data flows top-to-bottom across four layers. The RHC orchestrator (Layer 1) drives both the MILP planner (Layer 2A, runs every 2 s) and the physics simulator (Layer 2B, runs at 500 Hz). The planner produces B-spline control points Q\*, which are sampled to give reference position/velocity/acceleration to the geometric controller every 2 ms. The actual wind-disturbed drone state feeds back up to Layer 1 to start the next horizon — this feedback loop is what makes the system truly closed-loop.
+
+### Timing Diagram
+
+![UAV RHC Timing Diagram — shows how each 10-second planning horizon overlaps with a 2-second execution window repeating ~44 times over the 88-second flight. Each execution window runs 1000 RK4 physics steps. The actual wind-disturbed drone position at the end of each execute window becomes the starting state for the next MILP solve.](uav_rhc_timing_diagram.png)
+
+> **Reading the diagram:** Each PLAN covers a 10 s lookahead window but only the first 2 s (EXEC) is actually flown before replanning. The drone position `pos₀ → pos₁ → ...` shown at the bottom is the real, wind-disturbed position — not the planned one. This is what gets fed back into the next MILP solve.
+
+### Layer Summary
+
+| Layer | Files | Runs at | Role |
+|---|---|---|---|
+| 0 — Mission | `scenario.py` | Once at start | Define map, start, goal |
+| 1 — RHC Loop | `core.py` | Every 2 s | Orchestrate plan → execute → observe |
+| 2A — Planner | `planner_obstacles.py`, `bspline_utils.py` | Every 2 s | Solve MILP, return B-spline Q |
+| 2B — Physics | `quadrotor.py`, `controller.py` | Every 0.002 s (500 Hz) | Simulate real drone + wind |
+| 3 — Outputs | `simulation.py`, `visualizer.py` | After run | Save figures, HTML, cache, GUI |
 
 ---
 
 ## 3. Mathematical Foundations
 
-### 3.1 B-Spline Trajectory Representation
+### 3.1 B-Spline Trajectory
 
-The planned trajectory is a **B-spline of degree** $k=4$ (cubic-order, $C^3$ continuous).
+**File:** `bspline_utils.py`
 
-A B-spline curve is defined as:
+The planned trajectory is a **degree-4 B-spline** (quartic), giving $C^3$ continuity — position, velocity, acceleration, and jerk are all smooth. This is critical so the controller never receives discontinuous commands.
 
-$$\mathbf{p}(\tau) = \sum_{i=0}^{n} N_{i,k}(\tau)\, \mathbf{q}_i, \quad \tau \in [0, 1]$$
+**Trajectory curve:**
 
-where:
-- $\mathbf{q}_i \in \mathbb{R}^3$ are the **control points** (the MILP decision variables)
-- $N_{i,k}(\tau)$ are the **B-spline basis functions** computed by the Cox-de Boor recursion
+$$\mathbf{p}(\tau) = \sum_{i=0}^{n_c - 1} N_{i,k}(\tau)\,\mathbf{q}_i, \qquad \tau \in [0,\,1]$$
 
-**Cox-de Boor Recursion** (implemented in `bspline_utils.py`):
+where $\mathbf{q}_i \in \mathbb{R}^3$ are the **control points** (the MILP decision variables) and $N_{i,k}(\tau)$ are the basis functions from the Cox-de Boor recursion.
 
-$$N_{i,1}(\tau) = \begin{cases} 1 & \text{if } t_i \leq \tau < t_{i+1} \\ 0 & \text{otherwise} \end{cases}$$
+**Cox-de Boor Recursion:**
 
-$$N_{i,k}(\tau) = \frac{\tau - t_i}{t_{i+k-1} - t_i} N_{i,k-1}(\tau) + \frac{t_{i+k} - \tau}{t_{i+k} - t_{i+1}} N_{i+1,k-1}(\tau)$$
+$$N_{i,1}(\tau) = \begin{cases} 1 & t_i \leq \tau < t_{i+1} \\ 0 & \text{otherwise} \end{cases}$$
 
-**Velocity and Acceleration** are obtained by differentiating the basis functions:
+$$N_{i,k}(\tau) = \frac{\tau - t_i}{t_{i+k-1} - t_i}\,N_{i,k-1}(\tau) \;+\; \frac{t_{i+k} - \tau}{t_{i+k} - t_{i+1}}\,N_{i+1,k-1}(\tau)$$
 
-$$\dot{\mathbf{p}}(\tau) = \frac{1}{T_h}\sum_{i=0}^{n} N'_{i,k}(\tau)\, \mathbf{q}_i, \qquad \ddot{\mathbf{p}}(\tau) = \frac{1}{T_h^2}\sum_{i=0}^{n} N''_{i,k}(\tau)\, \mathbf{q}_i$$
+> Divisions by zero are treated as 0 (standard convention).
 
-In matrix form (how the MILP uses it):
+**Matrix form** used inside the MILP (pre-computed at $h+1 = 11$ sample points):
 
-$$\mathbf{X} = \mathbf{B}\,Q, \quad \mathbf{V} = \frac{1}{T_h}\mathbf{B}'\,Q, \quad \mathbf{A} = \frac{1}{T_h^2}\mathbf{B}''\,Q$$
+$$\mathbf{X} = \mathbf{B}\,Q \qquad \mathbf{V} = \frac{1}{T_h}\mathbf{B}'\,Q \qquad \mathbf{A} = \frac{1}{T_h^2}\mathbf{B}''\,Q$$
 
-where $Q \in \mathbb{R}^{n_c \times 3}$ is the matrix of all control points and $\mathbf{B}, \mathbf{B}', \mathbf{B}''$ are pre-computed basis matrices.
-
----
-
-### 3.2 MILP(Mixed Integer Linear Programming) Obstacle Avoidance (from Paper)
-
-This is the **core contribution of the reference paper**. To avoid a 3D box obstacle (cuboid), the drone must be **outside** at least one face. This is a non-convex constraint because of the "OR" logic — but it can be linearised using **Big-M disjunctive programming**.
-
-For a cuboid obstacle with bounds $[x_l, x_u] \times [y_l, y_u] \times [z_l, z_u]$ and safety margin $\eta$, at each trajectory sample point $i$:
-
-Introduce 6 binary variables $b^{(0)}, \ldots, b^{(5)} \in \{0,1\}$ with $\sum_{j=0}^{5} b_j = 1$ (exactly one must be active), and enforce:
-
-$$\mathbf{X}_i[x] \leq (x_l - \eta) + (1 - b_0) \cdot M$$
-$$\mathbf{X}_i[x] \geq (x_u + \eta) - (1 - b_1) \cdot M$$
-$$\mathbf{X}_i[y] \leq (y_l - \eta) + (1 - b_2) \cdot M$$
-$$\mathbf{X}_i[y] \geq (y_u + \eta) - (1 - b_3) \cdot M$$
-$$\mathbf{X}_i[z] \leq (z_l - \eta) + (1 - b_4) \cdot M$$
-$$\mathbf{X}_i[z] \geq (z_u + \eta) - (1 - b_5) \cdot M$$
-
-When $b_j = 1$, the corresponding constraint becomes tight (active). When $b_j = 0$, the Big-M constant $M = 10000$ relaxes the constraint so it is trivially satisfied. This forces the planner to be outside **at least one face** of each obstacle.
-
-**2D No-Fly Zones** (NFZ — infinite height, like restricted airspace) use the same logic with only 4 binary variables (no Z-face constraints).
-
-**Total Boolean Variables per Horizon** (this project):
-
-$$14 \text{ buildings} \times 6 \text{ sides} \times h + 4 \text{ NFZs} \times 4 \text{ sides} \times h = (84 + 16) \times 10 = 1000 \text{ binary variables}$$
+where $Q \in \mathbb{R}^{14 \times 3}$ is the full control-point matrix, and $\mathbf{B},\,\mathbf{B}',\,\mathbf{B}''$ are the pre-computed basis, velocity-basis, and acceleration-basis matrices.  
+This matrix form is what allows velocity and acceleration to appear as **linear constraints** in the MILP.
 
 ---
 
-### 3.3 Receding Horizon Control (RHC)
+### 3.2 MILP Obstacle Avoidance
 
-The full MILP over the entire 120-second flight would be computationally intractable. RHC decomposes it into a rolling sequence of short, tractable sub-problems.
+**File:** `planner_obstacles.py`
 
-**At each horizon $k$:**
+This is the **core contribution of the reference paper.** The problem: the drone must be *outside* at least one face of each building — this is an OR condition (non-convex). It is linearised using **Big-M disjunctive programming.**
 
-1. **Plan** a B-spline over a short window $T_h = 10\,\text{s}$ starting from the **current actual state** $(\mathbf{p}_{actual}, \dot{\mathbf{p}}_{actual})$
-2. **Execute** only the first $\Delta t = 2\,\text{s}$ of the plan (the committed portion)
-3. **Observe** the new actual state (which differs from the plan due to wind disturbance)
-4. **Repeat** from step 1
+**For a 3D cuboid** $[x_l, x_u] \times [y_l, y_u] \times [z_l, z_u]$ with safety margin $\eta$, at each trajectory sample point $i$:
 
-The key insight of closed-loop RHC vs. open-loop pre-computation:
+Introduce 6 binary variables $b_0, \ldots, b_5 \in \{0,1\}$ with:
+
+$$\sum_{j=0}^{5} b_j = 1 \quad \text{(exactly one escape direction is active)}$$
+
+Then enforce the six face constraints:
+
+$$X_i^x \leq (x_l - \eta) + (1-b_0)\,M \qquad \text{[left of building]}$$
+$$X_i^x \geq (x_u + \eta) - (1-b_1)\,M \qquad \text{[right of building]}$$
+$$X_i^y \leq (y_l - \eta) + (1-b_2)\,M \qquad \text{[in front]}$$
+$$X_i^y \geq (y_u + \eta) - (1-b_3)\,M \qquad \text{[behind]}$$
+$$X_i^z \leq (z_l - \eta) + (1-b_4)\,M \qquad \text{[below]}$$
+$$X_i^z \geq (z_u + \eta) - (1-b_5)\,M \qquad \text{[above]}$$
+
+**How it works:** When $b_j = 1$, that constraint is tight — the drone must be on that safe side. When $b_j = 0$, the term $(1-0) \cdot M = 10000$ makes the constraint trivially satisfied (relaxed). Only one $b_j = 1$ is enforced, so the drone is guaranteed to avoid **at least one face** per building per step.
+
+**2D No-Fly Zones** (infinite height, like restricted airspace) use the same logic with only 4 binary variables — no Z-face constraints.
+
+---
+
+### 3.3 Receding Horizon Control
+
+**File:** `core.py`
+
+Solving the MILP over the entire 88-second flight at once is computationally intractable. RHC breaks it into short, manageable sub-problems.
+
+**Each horizon repeats:**
+
+| Step | Action |
+|---|---|
+| 1. Plan | Solve MILP for a $T_h = 10\,\text{s}$ horizon from the **actual** drone state |
+| 2. Execute | Fly the first $\Delta t = 2\,\text{s}$ of the plan (1000 physics steps at 500 Hz) |
+| 3. Observe | Read the new **actual** state — which differs from the plan due to wind |
+| 4. Repeat | Go back to step 1 |
+
+**The optimisation problem at each horizon:**
+
+$$\min_{Q} \;\; w_1 \sum_{i=0}^{h-1} \|\mathbf{X}_{i+1} - \mathbf{X}_i\|_1 \;+\; w_2 \|\mathbf{X}_h - \mathbf{x}_f\|_1 \;+\; w_3 \sum_{i=1}^{h} X_i^z \;+\; w_4 \sum_{i=0}^{h-1} \|\Delta\mathbf{J}_i\|_1$$
+
+**Subject to:**
+
+| Constraint | Value | Purpose |
+|---|---|---|
+| $\mathbf{X}_0 = \mathbf{p}_\text{actual}$ | — | Start from real position |
+| $\mathbf{V}_0 = \dot{\mathbf{p}}_\text{actual}$ | — | No velocity jump |
+| $\mathbf{A}_0 = \ddot{\mathbf{p}}_\text{plan}$ | — | C² continuity at horizon boundary |
+| $-v_{max} \leq V_i^{x,y,z} \leq v_{max}$ | 60 m/s | Speed limit (per axis) |
+| $-a_{max} \leq A_i^{x,y,z} \leq a_{max}$ | 14.715 m/s² ≈ 1.5g | Thrust cap (per axis) |
+| $1 \leq X_i^z \leq z_{max}$ | 1–25 m | Altitude bounds |
+| Big-M obstacle constraints | — | As described in §3.2 |
+
+> **Altitude ceiling insight:** Setting $z_{max} = 25\,\text{m}$ below the tall-building height (200 m) forces the planner to navigate around them laterally. Short hurdles at 15 m are below the ceiling, so the planner flies over them — which is cheaper.
+
+**Open-loop vs. closed-loop:**
 
 | | Open-Loop | Closed-Loop (this project) |
 |---|---|---|
-| Planner input | Ideal state from previous plan | **Actual** wind-disturbed state |
-| Wind error | Accumulates unbounded | **Corrected** at every replanning step |
-| Infeasibility handling | Crashes | Graceful glide + retry |
+| Planner input | Predicted state from previous plan | **Actual** wind-disturbed state |
+| Wind error | Accumulates unbounded | Corrected every 2 seconds |
+| Infeasibility | Crashes | Graceful glide + retry |
 
-The optimisation solved at each horizon is:
-
-$$\min_{Q} \quad w_1 \sum_{i=1}^{h} \|\mathbf{X}_{i+1} - \mathbf{X}_i\|_1 + w_2 \|\mathbf{X}_h - \mathbf{x}_f\|_1 + w_3 \sum_{i=1}^h \mathbf{X}_i[z] + w_4 \sum_{i=1}^h \|\text{Jerk}_i\|_1$$
-
-subject to:
-
-- **Initial conditions:** $\mathbf{X}_0 = \mathbf{p}_{actual},\ \mathbf{V}_0 = \dot{\mathbf{p}}_{actual},\ \mathbf{A}_0 = \ddot{\mathbf{p}}_{plan}$
-- **Velocity limits:** $\|\mathbf{V}_i\| \leq v_{max} = 60\,\text{m/s}$
-- **Acceleration limits:** $\|\mathbf{A}_i\| \leq a_{max} = 14.715\,\text{m/s}^2\ (\approx 1.5g)$
-- **Altitude bounds:** $1\,\text{m} \leq X_i[z] \leq 25\,\text{m}$
-- **Big-M obstacle avoidance:** (as described in §3.2)
 ---
 
 ### 3.4 6-DOF Quadrotor Dynamics
 
-The quadrotor is modelled as a rigid body with the **12-state vector**:
+**File:** `quadrotor.py`
 
-$$\mathbf{s} = \begin{bmatrix} \mathbf{p} \\ \dot{\mathbf{p}} \\ \boldsymbol{\Phi} \\ \boldsymbol{\omega} \end{bmatrix} = \begin{bmatrix} x, y, z \\ v_x, v_y, v_z \\ \phi, \theta, \psi \\ p, q, r \end{bmatrix}$$
+The drone is modelled as a rigid body with a **12-dimensional state vector:**
 
-**Translational Dynamics** (Newton's second law + wind disturbance):
+$$\mathbf{s} = \begin{bmatrix} \mathbf{p} \\ \dot{\mathbf{p}} \\ \boldsymbol{\Phi} \\ \boldsymbol{\omega} \end{bmatrix} = \begin{bmatrix} x,\, y,\, z \\ v_x,\, v_y,\, v_z \\ \phi,\, \theta,\, \psi \\ p,\, q,\, r \end{bmatrix}$$
 
-$$m\ddot{\mathbf{p}} = \mathbf{R}\begin{bmatrix}0\cr0\cr T\end{bmatrix} - mg\mathbf{e}_3 + m\mathbf{w}$$
+where $\boldsymbol{\Phi} = (\phi,\theta,\psi)$ are ZYX Euler angles (roll, pitch, yaw) and $\boldsymbol{\omega} = (p,q,r)$ are body angular rates.
 
-where $T$ is total thrust, $\mathbf{R} \in SO(3)$ is the rotation matrix, and $\mathbf{w}$ is the wind acceleration disturbance.
+**Translational dynamics** (Newton's 2nd law + wind):
 
-**Rotation Matrix** (ZYX Euler convention: yaw $\psi$, pitch $\theta$, roll $\phi$):
+$$m\ddot{\mathbf{p}} = \mathbf{R}\begin{bmatrix}0\\0\\T\end{bmatrix} - mg\,\mathbf{e}_3 + m\mathbf{w}$$
 
-$$\mathbf{R} = R_z(\psi)\,R_y(\theta)\,R_x(\phi) = \begin{bmatrix} c_\psi c_\theta & c_\psi s_\theta s_\phi - s_\psi c_\phi & c_\psi s_\theta c_\phi + s_\psi s_\phi \\ s_\psi c_\theta & s_\psi s_\theta s_\phi + c_\psi c_\phi & s_\psi s_\theta c_\phi - c_\psi s_\phi \\ -s_\theta & c_\theta s_\phi & c_\theta c_\phi \end{bmatrix}$$
+where $T$ is total thrust, $\mathbf{R} \in SO(3)$ is the rotation matrix, and $\mathbf{w}$ is the Dryden wind acceleration.
 
-**Rotational Dynamics** (Euler's equation):
+**Rotation matrix** (ZYX convention — yaw first, then pitch, then roll):
+
+$$\mathbf{R} = R_z(\psi)\,R_y(\theta)\,R_x(\phi)$$
+
+**Rotational dynamics** (Euler's equation):
 
 $$\mathbf{I}\dot{\boldsymbol{\omega}} = \boldsymbol{\tau} - \boldsymbol{\omega} \times (\mathbf{I}\boldsymbol{\omega})$$
 
-where $\mathbf{I} = \text{diag}(0.0196, 0.0196, 0.0264)\,\text{kg}\cdot\text{m}^2$.
+where $\mathbf{I} = \text{diag}(0.0196,\; 0.0196,\; 0.0264)\;\text{kg·m}^2$ and $\boldsymbol{\tau}$ is the control torque vector.
 
-**Euler Angle Kinematics:**
+**Numerical integration** — 4th-order Runge-Kutta at $\delta t = 0.002\,\text{s}$ (500 Hz):
 
-$$\dot{\boldsymbol{\Phi}} = \begin{bmatrix} 1 & s_\phi \tan\theta & c_\phi \tan\theta \\ 0 & c_\phi & -s_\phi \\ 0 & s_\phi / c_\theta & c_\phi / c_\theta \end{bmatrix} \boldsymbol{\omega}$$
+$$\mathbf{s}(t+\delta t) = \mathbf{s}(t) + \frac{\delta t}{6}\left(\mathbf{k}_1 + 2\mathbf{k}_2 + 2\mathbf{k}_3 + \mathbf{k}_4\right)$$
 
-**Integration:** 4th-order Runge-Kutta (RK4) at $\Delta t_{sim} = 0.002\,\text{s}$ (500 Hz):
-
-$$\mathbf{s}(t + \Delta t) = \mathbf{s}(t) + \frac{\Delta t}{6}\left(\mathbf{k}_1 + 2\mathbf{k}_2 + 2\mathbf{k}_3 + \mathbf{k}_4\right)$$
+RK4 is used (rather than Euler) because at speeds up to 60 m/s and high angular rates, Euler integration accumulates significant errors unless the timestep is impractically small.
 
 ---
 
-### 3.5 Geometric Tracking Controller on SE(3)
+### 3.5 Geometric Controller on SE(3)
 
-Based on **T. Lee, M. Leok, N.H. McClamroch, "Geometric Tracking Control of a Quadrotor UAV on SE(3)", CDC 2010.**
+**File:** `controller.py`  
+**Reference:** Lee, Leok & McClamroch, CDC 2010
 
-Unlike conventional PID controllers, the geometric controller operates directly on the **Special Euclidean group** SE(3), avoiding the singularities inherent in Euler-angle representations (gimbal lock). The control law is:
+Unlike PID controllers that use Euler angles and suffer from **gimbal lock** (a singularity at pitch = ±90°), this controller operates directly on SO(3) — the rotation manifold — with no singularities.
 
-**Step 1 — Desired Force:**
+**The control law is computed in five steps:**
 
-$$\mathbf{F}_{des} = -K_p\,\mathbf{e}_p - K_v\,\mathbf{e}_v + mg\mathbf{e}_3 + m\,\ddot{\mathbf{p}}_d$$
+**① Desired force** (position + velocity feedback + feed-forward):
 
-where $\mathbf{e}_p = \mathbf{p} - \mathbf{p}_d$ and $\mathbf{e}_v = \dot{\mathbf{p}} - \dot{\mathbf{p}}_d$.
+$$\mathbf{F}_{des} = -K_p\,\mathbf{e}_p - K_v\,\mathbf{e}_v + mg\,\mathbf{e}_3 + m\,\ddot{\mathbf{p}}_d$$
 
-Gains are set for a critically-damped position loop ($\omega_n \approx 4\,\text{rad/s}$):
+where $\mathbf{e}_p = \mathbf{p} - \mathbf{p}_d$ (position error) and $\mathbf{e}_v = \dot{\mathbf{p}} - \dot{\mathbf{p}}_d$ (velocity error).  
+Gains: $K_p = \text{diag}(16,16,20)$, $K_v = \text{diag}(8,8,9)$ → critically damped at $\omega_n \approx 4\,\text{rad/s}$.
 
-$$K_p = \text{diag}(16, 16, 20), \quad K_v = \text{diag}(8, 8, 9)$$
+**② Total thrust** (projection of desired force onto current body-z):
 
-**Step 2 — Total Thrust:**
+$$T = \mathbf{F}_{des} \cdot \mathbf{b}_3, \qquad \mathbf{b}_3 = \mathbf{R}\,\mathbf{e}_3$$
 
-$$T = \mathbf{F}_{des} \cdot \mathbf{b}_3 = \mathbf{F}_{des} \cdot \mathbf{R}\,\mathbf{e}_3$$
+**③ Desired rotation matrix** from the force direction and desired heading:
 
-**Step 3 — Desired Rotation Matrix $\mathbf{R}_{des}$:**
+$$\mathbf{b}_{3,d} = \frac{\mathbf{F}_{des}}{\|\mathbf{F}_{des}\|}, \quad \mathbf{b}_{2,d} = \frac{\mathbf{b}_{3,d} \times \mathbf{b}_{1,c}}{\|\mathbf{b}_{3,d} \times \mathbf{b}_{1,c}\|}, \quad \mathbf{b}_{1,d} = \mathbf{b}_{2,d} \times \mathbf{b}_{3,d}$$
 
-The desired body-z axis points along the force direction:
+$$\mathbf{R}_{des} = \begin{bmatrix} \mathbf{b}_{1,d} & \mathbf{b}_{2,d} & \mathbf{b}_{3,d} \end{bmatrix}$$
 
-$$\mathbf{b}_{3,des} = \frac{\mathbf{F}_{des}}{\|\mathbf{F}_{des}\|}$$
-
-Given a desired heading $\mathbf{b}_{1,c} = [\cos\psi_d,\, \sin\psi_d,\, 0]^\top$:
-
-$$\mathbf{b}_{2,des} = \frac{\mathbf{b}_{3,des} \times \mathbf{b}_{1,c}}{\|\mathbf{b}_{3,des} \times \mathbf{b}_{1,c}\|}, \quad \mathbf{b}_{1,des} = \mathbf{b}_{2,des} \times \mathbf{b}_{3,des}$$
-
-$$\mathbf{R}_{des} = \begin{bmatrix} \mathbf{b}_{1,des} & \mathbf{b}_{2,des} & \mathbf{b}_{3,des} \end{bmatrix}$$
-
-**Step 4 — Attitude Error on SO(3):**
+**④ Attitude error on SO(3)** via the vee map:
 
 $$\mathbf{e}_R = \frac{1}{2}\,\text{vee}\!\left(\mathbf{R}_{des}^\top\mathbf{R} - \mathbf{R}^\top\mathbf{R}_{des}\right)$$
 
-where the **vee map** $\text{vee}(\cdot) : \mathfrak{so}(3) \to \mathbb{R}^3$ extracts a 3-vector from a skew-symmetric matrix.
+The **vee map** extracts a 3-vector from a skew-symmetric matrix: $\text{vee}(S) = [S_{32},\, S_{13},\, S_{21}]^\top$.
 
-**Step 5 — Control Torques:**
+**⑤ Control torques:**
 
 $$\boldsymbol{\tau} = -K_R\,\mathbf{e}_R - K_\omega\,\mathbf{e}_\omega + \boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}$$
 
-Gains are set for a much faster attitude loop ($\omega_n \approx 30\,\text{rad/s}$):
-
-$$K_R = \text{diag}(120, 120, 60), \quad K_\omega = \text{diag}(16, 16, 8)$$
+Gains: $K_R = \text{diag}(120,120,60)$, $K_\omega = \text{diag}(16,16,8)$ → $\omega_n \approx 30\,\text{rad/s}$ (attitude loop is ~7.5× faster than position loop). The $\boldsymbol{\omega} \times \mathbf{I}\boldsymbol{\omega}$ term cancels gyroscopic effects.
 
 ---
 
-### 3.6 Wind Turbulence Model (Dryden)
+### 3.6 Dryden Wind Turbulence Model
 
-The atmospheric wind is modelled as a **first-order Markov (auto-regressive) process** inspired by the Dryden Wind Turbulence Model (MIL-HDBK-1797):
+**File:** `quadrotor.py → WindModel`
 
-$$\mathbf{w}[k] = \rho\,\mathbf{w}[k-1] + \boldsymbol{\sigma} \odot \sqrt{1 - \rho^2}\;\mathbf{n}[k], \quad \mathbf{n}[k] \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$$
+Wind is modelled as a **first-order Markov (auto-regressive) process**, inspired by MIL-HDBK-1797:
 
-Parameters:
-- $\rho = 0.995$ — high autocorrelation gives **slow, persistent gusts** (realistic atmospheric turbulence)
-- $\boldsymbol{\sigma} = [1.8,\, 1.8,\, 0.4]\,\text{m/s}^2$ — moderate horizontal turbulence, low vertical
+$$\mathbf{w}[k] = \rho\,\mathbf{w}[k-1] + \boldsymbol{\sigma} \odot \sqrt{1-\rho^2}\;\mathbf{n}[k], \qquad \mathbf{n}[k] \sim \mathcal{N}(\mathbf{0},\mathbf{I})$$
 
-The wind acceleration is injected directly into the quadrotor's translational dynamics at every 2 ms physics step. Because the RHC planner uses the **actual** wind-pushed position at each replanning step, the controller continuously compensates for accumulated wind drift.
+| Parameter | Value | Effect |
+|---|---|---|
+| $\rho$ | 0.995 | High autocorrelation → slow, persistent gusts |
+| $\boldsymbol{\sigma}$ | $[1.8,\; 1.8,\; 0.4]\;\text{m/s}^2$ | Horizontal turbulence >> vertical |
+| Seed | 42 | Fully reproducible runs |
+
+The wind acceleration $\mathbf{w}$ is injected directly into the translational dynamics at every 2 ms physics step. Because the RHC planner uses the **actual** wind-pushed position at each replanning step, accumulated drift is corrected every 2 seconds automatically.
 
 ---
 
 ## 4. What We Implemented from the Paper
 
-All core algorithmic elements from Babaei & Karimi (2018) are implemented:
-
-| Component | Paper Section | Implementation |
+| Component | Paper Section | File |
 |---|---|---|
-| **B-spline trajectory** | §II | `bspline_utils.py` — Cox-de Boor recursion, matrix form |
-| **MILP formulation** | §III | `planner_obstacles.py` — `UAVPlannerMILP.plan()` |
-| **Big-M disjunctive obstacles** | §III-A | Binary variables per building face |
-| **No-fly zone constraints** | §III-B | 2D NFZ with 4-face disjunction |
-| **Velocity & acceleration bounds** | §III-C | Per-sample linear constraints |
-| **Altitude ceiling constraint** | §III | $z \leq z_{max}$ forces lateral avoidance |
-| **Trajectory objectives** | §IV | Path length + target approach + altitude + jerk |
-| **Receding Horizon structure** | §V | Rolling 2-second execution window |
+| B-spline trajectory representation | §II | `bspline_utils.py` |
+| MILP problem formulation (Big-M) | §III-A | `planner_obstacles.py` |
+| 2D No-Fly Zone constraints | §III-B | `planner_obstacles.py` |
+| Velocity & acceleration bounds | §III-C | `planner_obstacles.py` |
+| Altitude ceiling constraint | §III | `planner_obstacles.py` |
+| Multi-objective optimisation (J₁, J₂, J₃) | §IV | `planner_obstacles.py` |
+| Receding Horizon Control structure | §V | `core.py` |
 
 ---
 
 ## 5. What We Added Beyond the Paper
 
-The following components are **original extensions** not present in the reference paper:
-
 | Addition | Description |
 |---|---|
-| **True Closed-Loop RHC** | The paper uses pre-computed open-loop. We feed the **actual** 6-DOF physics state back to the planner at every horizon, correcting for wind drift in real-time. |
-| **6-DOF Quadrotor Dynamics** | Full rigid-body simulation with RK4 at 500 Hz. The paper only plans trajectories; we simulate whether a real drone could follow them. |
-| **Geometric Controller (SE3)** | Lee et al. (2010) attitude and position controller that operates on the rotation manifold SO(3), avoiding gimbal-lock singularities. |
-| **Dryden Wind Turbulence** | First-order Markov wind disturbance model. The drone is persistently pushed off-course and must actively correct. |
-| **Dense Urban Canyon Scenario** | 14 buildings + 4 NFZs in a complex S-curve layout requiring 7 distinct lateral manoeuvres. The paper only shows simple 2–3 building scenarios. |
+| **True Closed-Loop RHC** | The paper uses open-loop pre-computation. We re-plan from the **actual** wind-disturbed 6-DOF state at every horizon. |
+| **6-DOF Quadrotor Physics** | Full rigid-body simulation with RK4 at 500 Hz. The paper only plans; we simulate whether a real drone could follow. |
+| **Geometric Controller on SE(3)** | Lee et al. (2010) — operates on the rotation manifold SO(3), no gimbal-lock singularities. |
+| **Dryden Wind Turbulence** | First-order Markov gust model; drone is persistently pushed off-course and must actively correct. |
+| **Dynamic Obstacle Infrastructure** | `DynamicObstacle` class and RHC injection logic are fully implemented — currently disabled in the scenario (`create_dynamic_obstacle()` returns `None`). Ready to enable. |
+| **Free Open-Source Solver** | Paper uses commercial Gurobi; we use SciPy MILP via CVXPY — no licence needed. |
+| **Infeasibility Handling** | Graceful deceleration glide + retry if the MILP fails, rather than crashing. |
+| **Interactive Outputs** | 6-panel publication figure, standalone Plotly 3D HTML viewer, live animated GUI. |
+
 ---
 
-## 6. Scenario: Mixed-Height Urban Canyon
+## 6. Scenario: Urban Canyon
 
 ```
-  START [2500, -1400, 12m]
-       │
-       ├── TALL GATE A (200m)  ─── Thread laterally through gap
-       ├── LOW HURDLE 1 (15m)  ─── Climb over (Z >= 20m)
-       ├── TALL GATE B (200m)  ─── Thread laterally through gap
-       ├── LOW HURDLE 2 (15m)  ─── Climb over (Z >= 20m)
-       ├── TALL GATE C (200m)  ─── Thread laterally through gap
-       ├── LOW HURDLE 3 (15m)  ─── Climb over (Z >= 20m)
-       └── TALL GATE D (200m)  ─── Final gate approach into goal
-       │
-  GOAL [-2200, 2000, 12m]
+  START  [2500, -1400, 12 m]
+     │
+     ├── TALL GATE  (200 m)  ─── Fly laterally through the gap   ─── z_max = 25 m enforces this
+     │
+     ├── LOW HURDLE (15 m)   ─── Fly over                        ─── cheaper than going around
+     │
+     ├── TALL GATE  (200 m)  ─── Fly laterally through the gap
+     │
+     ├── LOW HURDLE (15 m)   ─── Fly over
+     │
+     └── [ 4 No-Fly Zones block trivial bypass routes ]
+     │
+  GOAL   [-2200, 2000, 12 m]
 ```
 
-- **Flight Duration:** ~88 seconds (44 RHC horizons)
-- **Tall Buildings (200 m):** Taller than altitude ceiling ($z_{max}=25\,\text{m}$), forcing lateral navigation.
-- **Low Hurdles (15 m):** Short wide walls where overflying is mathematically optimal ($z \ge 20\,\text{m}$).
-- **No-Fly Zones:** 3 restricted airspace zones strategically blocking trivial bypass routes.
+| Stat | Value |
+|---|---|
+| Straight-line distance | ~5.4 km |
+| Actual flight path | ~6 km |
+| Flight duration | ~88 seconds |
+| RHC horizons solved | ~44 |
+| Tall building height | 200 m (above $z_{max}=25$ m → lateral avoidance) |
+| Short hurdle height | 15 m (below $z_{max}=25$ m → overfly) |
+| No-Fly Zones | 4 zones blocking bypass routes |
 
 ---
 
 ## 7. File Structure
 
-| File | Purpose |
-|---|---|
-| `requirements.txt` | Python dependencies list |
-| `bspline_utils.py` | Cox-de Boor recursion; `get_bspline_matrices()`; `sample_trajectory()` |
-| `planner_obstacles.py` | `UAVPlannerMILP` class: MILP problem construction and solve |
-| `controller.py` | `GeometricController.compute()`: SE(3) tracking law |
-| `quadrotor.py` | `Quadrotor` (6-DOF RK4); `WindModel` (Dryden Markov) |
-| `dynamic_obstacle.py` | `DynamicObstacle`: constant-velocity intruder + NFZ projection |
-| `scenario.py` | `build_scenario()`: registers mixed-height buildings and NFZs |
-| `core.py` | `run_closed_loop_rhc()`: the main interleaved plan-simulate loop |
-| `simulation.py` | Entry point: runs simulation, saves PNG figure + HTML viewer |
-| `visualizer.py` | Live GUI: 3D animation, 2D map, telemetry strips |
-| `simulation_cache.npz` | Auto-generated cache for instant visualizer launch |
-| `simulation_results.png` | Auto-generated 6-panel publication figure |
-| `trajectory_3d.html` | Auto-generated interactive 3D viewer for web browsers |
+| File | Key Functions / Classes | Role |
+|---|---|---|
+| `bspline_utils.py` | `cox_de_boor()`, `get_bspline_matrices()`, `sample_trajectory()` | Pure B-spline maths — no framework imports |
+| `planner_obstacles.py` | `UAVPlannerMILP.plan()` | MILP formulation and solve |
+| `controller.py` | `GeometricController.compute()` | SE(3) tracking law |
+| `quadrotor.py` | `Quadrotor.step()`, `WindModel.step()` | 6-DOF RK4 physics + Dryden wind |
+| `dynamic_obstacle.py` | `DynamicObstacle.as_nfz()` | Constant-velocity intruder → NFZ *(built, currently disabled)* |
+| `scenario.py` | `build_scenario()` | Defines map: buildings, NFZs, start, goal |
+| `core.py` | `run_closed_loop_rhc()` | Interleaved plan-simulate RHC loop |
+| `simulation.py` | `main()`, `create_figure()`, `save_interactive_html()` | Entry point; generates all outputs |
+| `visualizer.py` | `FuncAnimation` loop | Live 3D GUI with HUD and telemetry |
+| `simulation_cache.npz` | — | Compressed log for instant GUI re-launch |
+| `simulation_results.png` | — | 6-panel publication figure |
+| `trajectory_3d.html` | — | Interactive Plotly 3D viewer (open in browser) |
+| `flight.mp4` | — | Rendered animation export |
 
 ---
 
-## 8. Project Setup & Execution Guide
+## 8. Setup and Running
 
-Follow these step-by-step instructions to set up and run the project from scratch on any new device.
+### Requirements
+- Python 3.10 or higher
+- Windows 10/11, macOS, or Linux
+- 4 GB RAM minimum
 
-### 8.1 System Requirements
-- **Operating System:** Windows 10/11, macOS, or Linux
-- **Python:** Python 3.10 or higher installed ([Download Python](https://www.python.org/downloads/))
-- **RAM:** Minimum 4 GB
+### Installation
 
----
-
-### 8.2 Step-by-Step Installation
-
-#### Step 1: Open Terminal / Command Prompt
-Open PowerShell (Windows) or Terminal (macOS/Linux) and navigate to the project directory:
 ```bash
-cd /path/to/Drones
-```
-
-#### Step 2: Create a Virtual Environment
-Creating a virtual environment ensures dependencies do not conflict with your global Python setup:
-```bash
-# Windows / macOS / Linux
+# 1. Create virtual environment
 python -m venv venv
-```
 
-#### Step 3: Activate the Virtual Environment
-- **Windows (PowerShell):**
-  ```powershell
-  .\venv\Scripts\Activate.ps1
-  ```
-  *(If you get a script execution policy error, run this first: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process`)*
+# 2. Activate
+#    Windows PowerShell:
+.\venv\Scripts\Activate.ps1
+#    Windows CMD:
+venv\Scripts\activate.bat
+#    macOS / Linux:
+source venv/bin/activate
 
-- **Windows (Command Prompt / CMD):**
-  ```cmd
-  venv\Scripts\activate.bat
-  ```
-
-- **Linux / macOS:**
-  ```bash
-  source venv/bin/activate
-  ```
-
-#### Step 4: Upgrade pip & Install Dependencies
-Install all required packages via `requirements.txt`:
-```bash
+# 3. Install dependencies
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
----
+> **Windows PowerShell script error?** Run this first:  
+> `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process`
 
-### 8.3 Running the Project
+### Running
 
-#### Mode A: Run Full Simulation (Generates Graphs & Cache)
-Runs the closed-loop RHC simulation, prints per-horizon solver progress in terminal, and outputs both a publication-ready 6-panel chart and an interactive 3D web model:
-```bash
-python simulation.py
-```
-**Outputs generated:**
-- `simulation_results.png` — 6-panel plot (3D trajectory, top-down map, altitude/wind, error metrics, control signals).
-- `trajectory_3d.html` — Standalone 3D interactive model (open in any web browser to rotate, pan, and inspect).
-- `simulation_cache.npz` — Cached flight trajectory data for instant animation playback.
+| Mode | Command | Output |
+|---|---|---|
+| **Full simulation** | `python simulation.py` | `simulation_results.png`, `trajectory_3d.html`, `simulation_cache.npz` |
+| **Live 3D GUI** | `python visualizer.py` | Animated window (loads cache instantly) |
+| **Force fresh run** | `python visualizer.py --fresh` | Re-runs MILP + physics, then opens GUI |
+| **Export video** | `python visualizer.py --save` | `flight.mp4` (ffmpeg) or `flight.gif` (fallback) |
 
-#### Mode B: Launch the Real-Time 3D Visualizer GUI
-Loads the simulation and launches the live interactive 3D visualization window:
-```bash
-python visualizer.py
-```
+### GUI Controls
 
-**GUI Keyboard & Mouse Controls:**
-| Control | Action |
+| Key / Action | Effect |
 |---|---|
-| `SPACE` | **Pause / Resume** animation |
-| **Mouse Left-Click Drag** | Rotate 3D camera angle *(while paused)* |
-| **Mouse Scroll Wheel** | Zoom in / Zoom out |
-| **Close Window** | Exit GUI |
+| `SPACE` | Pause / Resume animation |
+| Left-click drag *(while paused)* | Rotate 3D camera |
+| Scroll wheel | Zoom in / out |
 
-#### Mode C: Force Fresh Recomputation
-If you edit building positions or controller gains and want to recompute directly from the GUI without loading old cache:
-```bash
-python visualizer.py --fresh
-```
+### Troubleshooting
 
-#### Mode D: Export Video / GIF Animation
-To render and save the full flight animation directly to a video/GIF file:
-```bash
-python visualizer.py --save
-```
-*(Saves `flight.mp4` if `ffmpeg` is available on the system; otherwise automatically falls back to `flight.gif`)*
-
----
-
-### 8.4 Troubleshooting Common Issues
-
-1. **"Execution of scripts is disabled on this system" (Windows PowerShell):**
-   - Solution: Run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process` in PowerShell, then re-run `.\venv\Scripts\Activate.ps1`.
-2. **Tkinter / GUI window does not appear on Linux:**
-   - Solution: Install python-tk via your package manager: `sudo apt-get install python3-tk`
-3. **Solver errors or cvxpy installation issues:**
-   - Solution: Ensure you are using Python $\le 3.12$ and run `pip install --upgrade cvxpy scipy`.
-
+| Problem | Fix |
+|---|---|
+| GUI window doesn't appear (Linux) | `sudo apt-get install python3-tk` |
+| CVXPY / solver errors | `pip install --upgrade cvxpy scipy` (use Python ≤ 3.12) |
+| Plotly not found | `pip install plotly` |
 
 ---
 
@@ -455,41 +429,45 @@ python visualizer.py --save
 
 | File | Description |
 |---|---|
-| `simulation_results.png` | 6-panel figure: 3D path, top-down map, altitude, speed, tracking error, wind |
-| `trajectory_3d.html` | Interactive Plotly 3D scene with buildings, NFZs, and trajectory |
-| `flight.gif` / `flight.mp4` | Animation export from `python visualizer.py --save` |
-| `simulation_cache.npz` | Compressed numpy archive of all simulation logs |
+| `simulation_results.png` | 6-panel dark-theme figure: 3D path, top-down map, altitude + wind, X/Y tracking, tracking error, thrust + energy |
+| `trajectory_3d.html` | Standalone interactive Plotly 3D viewer — rotate, zoom, pan in any browser |
+| `simulation_cache.npz` | Compressed NumPy archive of all simulation logs — enables instant GUI re-launch |
+| `flight.mp4` / `flight.gif` | Rendered flight animation from `python visualizer.py --save` |
 
 ---
 
 ## 10. Key Parameters
 
-| Parameter | Value | Location | Effect |
-|---|---|---|---|
-| Spline degree $k$ | 4 | `planner_obstacles.py` | $C^3$ smoothness |
-| Horizon steps $h$ | 10 | `planner_obstacles.py` | 10 s lookahead |
-| Execute time $\Delta t$ | 2.0 s | `core.py` | Replanning frequency |
-| Physics timestep $\delta t$ | 0.002 s | `core.py` | 500 Hz simulation |
-| Max velocity $v_{max}$ | 60 m/s | `planner_obstacles.py` | Speed limit |
-| Max acceleration $a_{max}$ | 14.715 m/s² | `planner_obstacles.py` | 1.5g thrust cap |
-| Altitude ceiling $z_{max}$ | 25 m | `planner_obstacles.py` | Below building tops |
-| Safety margin $\eta$ | 80 m | `scenario.py` | Building clearance |
-| Big-M constant $M$ | 10000 | `planner_obstacles.py` | Disjunctive relaxation |
-| Wind autocorrelation $\rho$ | 0.995 | `quadrotor.py` | Persistent gusts |
-| Wind std-dev $\sigma$ | [1.8, 1.8, 0.4] m/s² | `quadrotor.py` | Turbulence intensity |
-| Position gain $K_p$ | diag(16,16,20) | `controller.py` | $\omega_n \approx 4$ rad/s |
-| Attitude gain $K_R$ | diag(120,120,60) | `controller.py` | $\omega_n \approx 30$ rad/s |
+| Parameter | Symbol | Value | File | Effect |
+|---|---|---|---|---|
+| Spline degree | $k$ | 4 | `planner_obstacles.py` | $C^3$ continuity |
+| Horizon steps | $h$ | 10 | `planner_obstacles.py` | 10 s lookahead, 14 control points |
+| Execute window | $\Delta t$ | 2.0 s | `simulation.py` | Replanning frequency |
+| Physics timestep | $\delta t$ | 0.002 s | `simulation.py` | 500 Hz RK4 |
+| Max velocity | $v_{max}$ | 60 m/s | `scenario.py` | Per-axis speed limit |
+| Max acceleration | $a_{max}$ | 14.715 m/s² | `planner_obstacles.py` | ≈ 1.5g thrust cap |
+| Altitude ceiling | $z_{max}$ | 25 m | `planner_obstacles.py` | Forces lateral avoidance of tall buildings |
+| Safety margin (tall building) | $\eta$ | 80 m | `scenario.py` | Clearance from building face |
+| Safety margin (NFZ) | $\gamma$ | 30 m | `scenario.py` | Clearance from NFZ boundary |
+| Big-M constant | $M$ | 10 000 | `planner_obstacles.py` | Disjunctive constraint relaxation |
+| Wind autocorrelation | $\rho$ | 0.995 | `quadrotor.py` | Slow, persistent gusts |
+| Wind std-dev | $\boldsymbol{\sigma}$ | [1.8, 1.8, 0.4] m/s² | `quadrotor.py` | Turbulence intensity |
+| Position gain | $K_p$ | diag(16, 16, 20) | `controller.py` | $\omega_n \approx 4$ rad/s |
+| Velocity gain | $K_v$ | diag(8, 8, 9) | `controller.py` | Critical damping |
+| Attitude gain | $K_R$ | diag(120, 120, 60) | `controller.py` | $\omega_n \approx 30$ rad/s |
+| Angular rate gain | $K_\omega$ | diag(16, 16, 8) | `controller.py` | Attitude damping |
+| Goal radius | — | 50 m | `core.py` | Termination threshold |
 
 ---
 
 ## 11. References
 
-1. **A. R. Babaei and M. Karimi**, "Optimization of UAV Trajectory in Urban Area," *2018* — Core MILP + B-spline planning method.
+1. **A. R. Babaei and M. Karimi** — *"Optimal Trajectory-Planning of UAVs via B-Splines and Disjunctive Programming,"* 2018. Core MILP + B-spline planning method. [[arXiv]](https://arxiv.org/pdf/1807.02931)
 
-2. **T. Lee, M. Leok, N. H. McClamroch**, "Geometric Tracking Control of a Quadrotor UAV on SE(3)," *49th IEEE Conference on Decision and Control (CDC)*, 2010, pp. 5420–5425. — Geometric controller on SE(3).
+2. **T. Lee, M. Leok, N. H. McClamroch** — *"Geometric Tracking Control of a Quadrotor UAV on SE(3),"* 49th IEEE CDC, 2010, pp. 5420–5425. Geometric controller on SE(3).
 
-3. **MIL-HDBK-1797**, "Flying Qualities of Piloted Aircraft," US Department of Defense, 1997. — Dryden wind turbulence model specification.
+3. **MIL-HDBK-1797** — *"Flying Qualities of Piloted Aircraft,"* US Department of Defense, 1997. Dryden wind turbulence model specification.
 
-4. **L. Piegl and W. Tiller**, *The NURBS Book*, 2nd ed., Springer, 1997. — B-spline theory and Cox-de Boor algorithm.
+4. **L. Piegl and W. Tiller** — *The NURBS Book,* 2nd ed., Springer, 1997. B-spline theory and Cox-de Boor algorithm.
 
-5. **cvxpy** — Diamond & Boyd, "CVXPY: A Python-embedded modeling language for convex optimization," *JMLR*, 2016.
+5. **S. Diamond and S. Boyd** — *"CVXPY: A Python-Embedded Modeling Language for Convex Optimization,"* JMLR, 2016. Optimisation framework used for MILP formulation.
